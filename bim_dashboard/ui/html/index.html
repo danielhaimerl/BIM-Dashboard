@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>BIM Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ======= HEADER ======= -->
+  <header class="app-header">
+    <div class="header-left">
+      <span class="logo">⬡ BIM Dashboard</span>
+      <span class="project-name" id="projectName">Projekt</span>
+    </div>
+    <div class="header-center">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Verbinde…</span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-primary" id="btnRefresh">⟳ Aktualisieren</button>
+      <button class="btn" id="btnZoom">⌖ Zoom</button>
+      <button class="btn" id="btnIsolate">◎ Isolieren</button>
+    </div>
+  </header>
+
+  <!-- ======= PROJEKTINFO-BANNER ======= -->
+  <div class="project-banner">
+    <div class="metric-card">
+      <span class="metric-label">Bauteile</span>
+      <span class="metric-value" id="metaBauteile">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
+      <span class="metric-label">Gewerke</span>
+      <span class="metric-value" id="metaGewerke">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
+      <span class="metric-label">Klassifiziert</span>
+      <span class="metric-value" id="metaKlassifiziert">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
+      <span class="metric-label">Gesamtkosten</span>
+      <span class="metric-value metric-value-cost" id="metaGesamtkosten">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card editable">
+      <span class="metric-label">Kosten Ziel</span>
+      <div class="metric-value-row">
+        <span class="metric-value" id="metaKosten">—</span>
+        <button class="btn-edit" id="btnEditKosten">✎</button>
+      </div>
+      <input class="metric-input" id="inputKosten" type="text" placeholder="z.B. 2.450.000 €" style="display:none" />
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card editable">
+      <span class="metric-label">BGF m²</span>
+      <div class="metric-value-row">
+        <span class="metric-value" id="metaBGF">—</span>
+        <button class="btn-edit" id="btnEditBGF">✎</button>
+      </div>
+      <input class="metric-input" id="inputBGF" type="text" placeholder="z.B. 1.250" style="display:none" />
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card editable">
+      <span class="metric-label">BRI m³</span>
+      <div class="metric-value-row">
+        <span class="metric-value" id="metaBRI">—</span>
+        <button class="btn-edit" id="btnEditBRI">✎</button>
+      </div>
+      <input class="metric-input" id="inputBRI" type="text" placeholder="z.B. 4.800" style="display:none" />
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-save" id="metaSaveArea" style="display:none">
+      <button class="btn btn-primary btn-sm" id="btnSaveMeta">✓</button>
+    </div>
+  </div>
+
+  <!-- ======= APP-KÖRPER: Nav + Inhalt ======= -->
+  <div class="app-body" id="appBody">
+
+    <!-- LINKE NAVIGATION -->
+    <nav class="sidebar" id="sidebar">
+      <button class="nav-item active" data-module="classify" title="Klassifizieren">
+        <span class="nav-icon">⬡</span>
+        <span class="nav-label">Klassifizieren</span>
+      </button>
+      <button class="nav-item" data-module="report" title="Auswertung">
+        <span class="nav-icon">▤</span>
+        <span class="nav-label">Auswertung</span>
+      </button>
+      <div class="nav-divider"></div>
+      <button class="nav-item" data-module="library" title="Bibliothek">
+        <span class="nav-icon">☰</span>
+        <span class="nav-label">Bibliothek</span>
+      </button>
+      <div class="nav-divider"></div>
+      <button class="nav-item nav-item-import" id="btnImportExcel" title="Projektstruktur aus Excel importieren">
+        <span class="nav-icon">↑</span>
+        <span class="nav-label">Import</span>
+      </button>
+    </nav>
+
+    <!-- MODUL: Klassifizieren (Bauteile + Klassifikation) -->
+    <div class="module active" id="moduleClassify">
+
+      <!-- Bauteilliste -->
+      <div class="panel panel-list" id="panelList">
+        <div class="panel-header">
+          <h2>Bauteile <span class="badge" id="entityCount">0</span></h2>
+          <button class="btn btn-sm" id="btnSelectAll">Alle markieren</button>
+          <button class="btn btn-sm" id="btnCalcQty" title="Mengen aller Bauteile aus Geometrie berechnen">⊞ Mengen</button>
+          <input type="search" id="searchInput" placeholder="Suchen…" />
+        </div>
+        <div class="filter-bar">
+          <div id="tagFilterRows"></div>
+        </div>
+        <div class="list-container" id="entityList">
+          <p class="placeholder">Lade Bauteile…</p>
+        </div>
+        <div class="selection-bar" id="selectionBar" style="display:none">
+          <span id="selectionCount">0 ausgewählt</span>
+          <button class="btn btn-sm btn-danger" id="btnClearSelected">Tags löschen</button>
+        </div>
+      </div>
+
+      <div class="resize-handle" data-panel="panelList"></div>
+
+      <!-- Klassifikation -->
+      <div class="panel panel-tags" id="panelTags">
+        <div class="panel-header">
+          <h2>Klassifikation</h2>
+          <span class="hint" id="tagEditorHint">Bauteil wählen</span>
+        </div>
+        <div class="tag-batch-hint" id="tagBatchHint" style="display:none">
+          <span id="tagBatchText"></span>
+        </div>
+        <div id="tagEditorBody">
+          <p class="placeholder">Wähle ein oder mehrere Bauteile.</p>
+        </div>
+        <div class="tag-actions" id="tagActions" style="display:none">
+          <button class="btn btn-primary" id="btnSaveTags">✓ Speichern</button>
+          <button class="btn" id="btnResetTags">Zurücksetzen</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- MODUL: Auswertung -->
+    <div class="module" id="moduleReport">
+      <div class="panel panel-report" id="panelReport">
+        <div class="panel-header">
+          <h2>Auswertung</h2>
+          <div class="report-controls">
+            <button class="btn btn-sm" id="btnExportCSV">↓ CSV</button>
+            <button class="btn btn-sm" id="btnExportJSON">↓ JSON</button>
+          </div>
+        </div>
+        <div class="group-controls" id="groupControlsWrap">
+          <label>Gruppierung:</label>
+          <select id="groupBy1"><option value="">— keine —</option></select>
+          <select id="groupBy2"><option value="">— keine —</option></select>
+          <select id="groupBy3"><option value="">— keine —</option></select>
+        </div>
+        <div class="report-filter-bar" id="reportFilterBar">
+          <span class="filter-label">Filter:</span>
+          <div class="report-filters" id="reportFilters"></div>
+          <button class="btn btn-sm" id="btnClearReportFilter" style="display:none">✕ Alle löschen</button>
+        </div>
+        <div id="reportContainer">
+          <p class="placeholder">Gruppierung wählen um Auswertung zu starten.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODUL: Bibliothek -->
+    <div class="module" id="moduleLibrary">
+      <div class="panel panel-library" id="panelLibrary">
+        <div class="panel-header">
+          <h2>Bibliothek</h2>
+          <button class="btn btn-sm btn-primary" id="btnLibSave">✓ Speichern</button>
+        </div>
+        <div class="lib-tab-bar" id="libTabBar"></div>
+        <div class="lib-hint">
+          Werte hier einmalig pflegen — sie erscheinen dann als Dropdown beim Klassifizieren.
+        </div>
+        <div id="libTableContainer" class="lib-table-container">
+          <p class="placeholder">Lade Bibliothek…</p>
+        </div>
+        <div class="lib-footer">
+          <button class="btn btn-sm" id="btnLibAdd">+ Eintrag</button>
+          <span class="lib-future-hint">Excel-Import/Export: geplant</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /app-body -->
+
+  <!-- BIM Dashboard v3 -->
+  <script src="app.js"></script>
+  <script src="report.js"></script>
+  <script src="costs.js"></script>
+  <script src="library.js"></script>
+</body>
+</html>
