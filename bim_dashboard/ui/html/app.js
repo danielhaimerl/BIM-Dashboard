@@ -334,6 +334,7 @@ const DIN276_LEVELS = {
 };
 
 function groupLabel(key) {
+  if (key === 'din276') return 'DIN 276 – 3. Ebene';
   return DIN276_LEVELS[key] || (State.categories || {})[key] || key;
 }
 

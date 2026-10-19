@@ -519,35 +519,34 @@ body {
 .report-section-header .cost-section-pct    { font-size: 11px; color: rgba(255,255,255,0.65); margin-left: auto; }
 .report-section-header .cost-section-total  { font-size: 14px; font-weight: 700; color: #fff; min-width: 100px; text-align: right; }
 
-/* Tiefe 1 – zweite Ebene: dunkle Schrift auf hellem Hintergrund */
+/* Unterebenen eingerückt (verschachtelt → 2. Ebene 16px, 3. Ebene 32px) */
+.report-section.depth-1,
+.report-section.depth-2 { margin-left: 16px; }
+
+/* Tiefe 1 – zweite Ebene: mittleres Blau */
 .report-section.depth-1 .report-section-header {
-  background: var(--bg3);
-  color: var(--text) !important;
+  background: #4A8BC9;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+}
+.report-section.depth-1 .report-section-header .cost-section-total { font-size: 13px; font-weight: 600; }
+
+/* Tiefe 2 – dritte Ebene: helles Blau, dunkle Schrift */
+.report-section.depth-2 .report-section-header {
+  background: var(--accent-bg);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 600;
-  padding: 6px 10px 6px 20px;
+  padding: 5px 12px;
   border-radius: var(--radius);
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent-mid);
 }
-.report-section.depth-1 .report-section-header .report-toggle     { color: var(--text-hint) !important; }
-.report-section.depth-1 .report-section-header .report-cat-label  { color: var(--text-hint) !important; }
-.report-section.depth-1 .report-section-header .report-group-label{ color: var(--text)      !important; }
-.report-section.depth-1 .report-section-header .cost-section-total{ color: var(--text)      !important; font-size: 12px; font-weight: 600; }
-.report-section.depth-1 .report-section-header .cost-section-pct  { color: var(--text-dim)  !important; }
-.report-section.depth-1 .report-section-header .badge             { background: var(--bg); color: var(--text-dim) !important; border: 1px solid var(--border); }
-.report-section.depth-1 .report-section-header .report-select-hint{ color: var(--text-hint) !important; }
-
-/* Tiefe 2 – dritte Ebene: sehr zurückhaltend */
-.report-section.depth-2 .report-section-header {
-  background: var(--bg);
-  color: var(--text-hint);
-  font-size: 11px;
-  font-weight: 400;
-  padding: 4px 10px 4px 32px;
-  border-radius: 0;
-  border: none;
-  border-bottom: 1px solid var(--border);
-}
+.report-section.depth-2 .report-section-header .report-toggle,
+.report-section.depth-2 .report-section-header .report-cat-label  { color: var(--text-hint); }
+.report-section.depth-2 .report-section-header .cost-section-total { color: var(--accent); font-size: 12px; font-weight: 600; }
+.report-section.depth-2 .report-section-header .badge { background: #fff; color: var(--accent); border: 1px solid var(--accent-mid); }
 
 .report-toggle { color: var(--text-hint); }
 .report-cat-label { color: var(--text-hint); font-size: 11px; font-weight: 400; }

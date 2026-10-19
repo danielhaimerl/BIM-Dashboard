@@ -20,6 +20,24 @@ function resolveLabel(catKey, rawVal) {
   return rawVal;
 }
 
+// Überspringt Unterebenen, die dieselbe KG-Nummer wie die Elterngruppe tragen
+// (z. B. Bauteil direkt mit "320 Gründung" getaggt → keine eigene 3. Ebene)
+function kgCode(label) {
+  const m = String(label).match(/^\s*(\d{3})/);
+  return m ? m[1] : null;
+}
+
+function skipSameKg(node, depth, parentLabel) {
+  const code = kgCode(parentLabel);
+  while (code && !node.__items__) {
+    const keys = Object.keys(node);
+    if (keys.length !== 1 || kgCode(keys[0]) !== code) break;
+    node = node[keys[0]];
+    depth++;
+  }
+  return { node, depth };
+}
+
 // ---------------------------------------------------------------------------
 // Haupt-Render-Funktion
 // ---------------------------------------------------------------------------
@@ -146,10 +164,11 @@ function buildSection(node, groupKeys, depth) {
       toggle.textContent = collapsed ? '▾' : '▸';
     });
 
-    if (!node[label].__items__ && groupKeys[depth + 1]) {
-      body.appendChild(buildSummaryTable(children, groupKeys[depth + 1], subtotal));
+    const sub = skipSameKg(children, depth + 1, label);
+    if (!sub.node.__items__ && groupKeys[sub.depth]) {
+      body.appendChild(buildSummaryTable(sub.node, groupKeys[sub.depth], subtotal));
     }
-    body.appendChild(buildSection(children, groupKeys, depth + 1));
+    body.appendChild(buildSection(sub.node, groupKeys, sub.depth));
 
     section.appendChild(hdr);
     section.appendChild(body);
@@ -198,7 +217,7 @@ function buildSummaryTable(node, nextCatKey, parentTotal) {
       <td class="num">${n}</td>
       <td class="num">
         <div class="pct-bar-wrap">
-          <div class="pct-bar" style="width:${anteil}%"></div>
+          <div class="pct-bar" style="width:${anteil * 0.6}%"></div>
           <span>${anteil} %</span>
         </div>
       </td>
@@ -836,7 +855,8 @@ function collectExportSections(node, groupKeys, depth, rows) {
     const cost         = sumCosts(items);
     const displayLabel = resolveLabel(catKey, label);
     rows.push({ type: 'section', depth, label: `${catLabel}: ${displayLabel}`, count: items.length, cost });
-    collectExportSections(children, groupKeys, depth + 1, rows);
+    const sub = skipSameKg(children, depth + 1, label);
+    collectExportSections(sub.node, groupKeys, sub.depth, rows);
   });
 }
 
