@@ -90,7 +90,7 @@ function renderReport() {
 function buildTotalHeader(total, count) {
   const hdr = document.createElement('div');
   hdr.className = 'cost-report-header';
-  const bgf = parseFloat(document.getElementById('metaBGF')?.textContent) || 0;
+  const bgf = State.bgfTotal || 0;
   hdr.innerHTML = `
     <div class="cost-report-kpi">
       <span>Bauteile</span>
@@ -139,6 +139,7 @@ function buildSection(node, groupKeys, depth) {
       <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
+      <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
       <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
       <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
     `;
@@ -731,6 +732,13 @@ function fmtEur(v) {
   return parseFloat(v).toLocaleString('de-DE', {
     minimumFractionDigits: 2, maximumFractionDigits: 2
   }) + ' €';
+}
+
+// Benchmark: Kosten je m² BGF (leer, wenn keine BGF oder keine Kosten)
+function fmtBgf(cost) {
+  const bgf = State.bgfTotal || 0;
+  if (!(bgf > 0 && cost > 0)) return '';
+  return Math.round(cost / bgf).toLocaleString('de-DE') + ' €/m² BGF';
 }
 
 function fmtNum(v) {
