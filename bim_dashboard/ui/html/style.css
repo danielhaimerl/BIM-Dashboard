@@ -520,9 +520,15 @@ body {
 .report-section-header .report-cat-label { color: rgba(255,255,255,0.6); font-size: 10px; font-weight: 400; }
 .report-section-header .badge                { background: rgba(255,255,255,0.2); color: #fff; border: none; }
 .report-section-header .cost-section-pct    { font-size: 11px; color: rgba(255,255,255,0.65); margin-left: auto; }
-.report-section-header .cost-section-menge  { font-size: 11px; font-weight: 400; opacity: .85; min-width: 100px; text-align: right; }
-.report-section-header .cost-section-bgf    { font-size: 11px; font-weight: 400; opacity: .8; min-width: 110px; text-align: right; }
-.report-section-header .cost-section-total  { font-size: 14px; font-weight: 700; color: #fff; min-width: 100px; text-align: right; }
+.report-section-header .cost-section-total  { font-size: 14px; font-weight: 700; color: #fff; }
+/* Rechte Spalten der Kopfzeile: gleiche Breiten wie Menge / EP / GB / ⌖ in der Bauteiltabelle */
+.report-section-header { padding-right: 0 !important; }
+.report-section-header .hdr-cols { display: flex; align-items: center; flex-shrink: 0; }
+.report-section-header .hdr-cols > span { box-sizing: border-box; padding: 0 8px; text-align: right; white-space: nowrap; }
+.report-section-header .cost-section-menge { width: 120px; font-size: 11px; font-weight: 400; opacity: .85; }
+.report-section-header .cost-section-bgf   { width: 120px; font-size: 11px; font-weight: 400; opacity: .8; }
+.report-section-header .cost-section-total { width: 130px; }
+.report-section-header .hdr-cols .report-select-hint { width: 24px; padding: 0; margin-left: 0; text-align: center; }
 
 /* Unterebenen eingerückt (verschachtelt → 2. Ebene 16px, 3. Ebene 32px) */
 .report-section.depth-1,

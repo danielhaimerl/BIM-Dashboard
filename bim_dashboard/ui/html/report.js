@@ -180,11 +180,13 @@ function buildSection(node, groupKeys, depth, parentTotal) {
       <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
-      <span class="cost-section-menge">${fmtGroupMenge(items)}</span>
       <span class="pct-bar-wrap header-pct"><span class="pct-bar" style="width:${anteil * 0.6}%"></span><span>${anteil} %</span></span>
-      <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
-      <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
-      <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
+      <span class="hdr-cols">
+        <span class="cost-section-menge">${fmtGroupMenge(items)}</span>
+        <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
+        <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
+        <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
+      </span>
     `;
 
     hdr.addEventListener('click', (e) => {
@@ -227,13 +229,14 @@ function buildDetailTable(items) {
   wrap.className = 'report-agg-wrapper';
   const tbl = document.createElement('table');
   tbl.className = 'report-table';
+  // Die letzten Spalten haben feste Breiten, passend zu .hdr-cols in den Gruppen-Kopfzeilen
   tbl.innerHTML = `<colgroup>
-    <col style="width:30%">
-    <col style="width:16%">
-    <col style="width:14%">
-    <col style="width:13%">
-    <col style="width:12%">
-    <col style="width:13%">
+    <col style="width:35%">
+    <col>
+    <col>
+    <col style="width:120px">
+    <col style="width:120px">
+    <col style="width:130px">
     <col style="width:24px">
   </colgroup>`;
 
