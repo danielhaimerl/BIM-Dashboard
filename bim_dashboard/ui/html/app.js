@@ -20,6 +20,11 @@ const State = {
   classFilter:    'all',     // 'all' | 'classified' | 'unclassified'
   tagFilters:     {},        // { gewerk: 'Rohbau', ... } – aktive Tag-Filter
   isolateActive:  false,     // Isolier-Modus ein/aus
+  reportFilters:  {},        // aktive Filter im Auswertungs-Tab
+  kostenstufe:    '01 - Kostenprognose',
+  bgfTotal:       0,
+  briTotal:       0,
+  wohnungenTotal: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -34,6 +39,7 @@ window.rubyBridge = {
     buildTagFilterSelects();
     renderEntityList();
     renderReport();
+    updateAutoMetrics();
     updateCostBanner();
   },
 
@@ -44,14 +50,17 @@ window.rubyBridge = {
   },
 
   onSketchupSelectionChanged(ids) {
-    // SketchUp hat Selektion verändert → im Dashboard markieren
-    State.selectedIds = new Set(ids.map(String));
+    const skuIds = new Set(ids.map(String));
+    // list_ids aller Entities finden deren SketchUp-ID selektiert ist
+    State.selectedIds = new Set(
+      State.entities.filter(e => skuIds.has(String(e.id))).map(e => e.list_id || String(e.id))
+    );
     renderEntityList();
     renderTagEditor();
     updateSelectionBar();
-    // Erstes selektiertes Element in der Liste sichtbar scrollen
     if (ids.length > 0) {
-      scrollToEntity(String(ids[0]));
+      // Timeout damit renderEntityList() den DOM vollständig aufgebaut hat
+      setTimeout(() => scrollToEntity(String(ids[0])), 50);
     }
   },
 
@@ -87,8 +96,7 @@ window.rubyBridge = {
   onProjectMetaLoaded(meta) {
     document.getElementById('projectName').textContent = meta.name || 'Projekt';
     document.getElementById('metaKosten').textContent = meta.gesamtkosten || '—';
-    document.getElementById('metaBGF').textContent    = meta.bgf || '—';
-    document.getElementById('metaBRI').textContent    = meta.bri || '—';
+    // BGF und BRI kommen immer aus dem Modell (updateAutoMetrics), nicht aus gespeicherten Meta-Daten
   },
 
   onProjectMetaSaved({ success }) {
@@ -180,8 +188,9 @@ function bindNavigation() {
       const mod = document.getElementById(moduleId);
       if (mod) mod.classList.add('active');
 
-      // Report neu rendern wenn Auswertung geöffnet wird
       if (btn.dataset.module === 'report') renderReport();
+      if (btn.dataset.module === 'agent' && typeof onAgentModuleActivated === 'function')
+        onAgentModuleActivated();
     });
   });
 
@@ -193,18 +202,25 @@ function bindNavigation() {
 
 function bindControls() {
   // Header
+  document.getElementById('kostenstufeSelect').addEventListener('change', (e) => {
+    State.kostenstufe = e.target.value;
+    updateCostBanner();
+  });
+
   document.getElementById('btnRefresh').addEventListener('click', () => {
     ruby('refreshModel');
   });
   document.getElementById('btnZoom').addEventListener('click', () => {
-    ruby('zoomToSelection');
+    const ids = getSelectedEntityIds();
+    if (!ids.length) return;
+    ruby('selectAndZoom', ids);
   });
 
   document.getElementById('btnIsolate').addEventListener('click', () => {
     if (State.isolateActive) {
       ruby('isolateDisable');
     } else {
-      const ids = [...State.selectedIds].map(Number);
+      const ids = getSelectedEntityIds();
       if (!ids.length) {
         showToast('Zuerst Bauteile selektieren', 'error');
         return;
@@ -233,20 +249,19 @@ function bindControls() {
     renderReport();
   });
 
-  // "Alle markieren" – selektiert alle gefilterten Bauteile
+  // "Alle markieren" – ersetzt Selektion durch alle gefilterten Bauteile
   document.getElementById('btnSelectAll').addEventListener('click', () => {
     const filtered = getFilteredEntities();
     if (!filtered.length) { showToast('Keine Bauteile im aktuellen Filter', 'error'); return; }
-    filtered.forEach(e => State.selectedIds.add(String(e.id)));
+    State.selectedIds = new Set(filtered.map(e => e.list_id || String(e.id)));
     renderEntityList();
-    syncSelectionToSketchUp();
     updateSelectionBar();
     renderTagEditor();
     showToast(`${filtered.length} Bauteil${filtered.length !== 1 ? 'e' : ''} markiert`);
   });
   document.getElementById('btnClearSelected').addEventListener('click', () => {
     if (!confirm(`Tags für ${State.selectedIds.size} Bauteil(e) löschen?`)) return;
-    ruby('clearTags', { ids: [...State.selectedIds], category: null });
+    ruby('clearTags', { ids: getSelectedEntityIds(), category: null });
   });
 
   // Tag-Editor (mittlere Spalte – einziger Weg zum Vergeben von Tags)
@@ -254,6 +269,12 @@ function bindControls() {
   document.getElementById('btnResetTags').addEventListener('click', renderTagEditor);
 
   // Export
+  document.getElementById('btnCalcQty')?.addEventListener('click', () => {
+    const ids = getSelectedEntityIds();
+    ruby('calculateQuantities', ids.length ? ids : null);
+  });
+
+  document.getElementById('btnExportExcel')?.addEventListener('click', exportReportExcel);
   document.getElementById('btnExportCSV').addEventListener('click', exportCSV);
   document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
 }
@@ -292,7 +313,7 @@ function getFilteredEntities() {
 function renderEntityList() {
   const container = document.getElementById('entityList');
   const filtered  = getFilteredEntities();
-  State.filteredIds = filtered.map(e => String(e.id));
+  State.filteredIds = filtered.map(e => e.list_id || String(e.id));
 
   if (!filtered.length) {
     container.innerHTML = '<p class="placeholder">Keine Bauteile gefunden.</p>';
@@ -353,16 +374,23 @@ function renderGroup(node, depth) {
 }
 
 function renderEntityRow(entity) {
-  const row = document.createElement('div');
-  const id  = String(entity.id);
-  const sel = State.selectedIds.has(id);
+  const row    = document.createElement('div');
+  const listId = entity.list_id || String(entity.id);  // eindeutig pro Listeneintrag
+  const id     = String(entity.id);                    // echte SketchUp entityID
+  const sel    = State.selectedIds.has(listId);
   row.className = `entity-row${sel ? ' selected' : ''}`;
-  row.dataset.id = id;
+  row.dataset.id     = listId;
+  row.dataset.sku_id = id;
 
   // Tags die in der Bauteilliste NICHT als Badge erscheinen sollen
   const HIDDEN_IN_LIST = new Set(['menge', 'menge_auto', 'einheitspreis', 'einheit', 'ref_stufe2', 'preis_id']);
 
-  const STUFE_LABELS = { '1': 'Stufe 1', '2': 'Stufe 2', '3': 'Stufe 3' };
+  const STUFE_LABELS = {
+    '1': '01 - Kostenprognose', '2': '02 - Kostenschätzung', '3': '03 - Kostenberechnung',
+    '01 - Kostenprognose': '01 - Kostenprognose',
+    '02 - Kostenschätzung': '02 - Kostenschätzung',
+    '03 - Kostenberechnung': '03 - Kostenberechnung',
+  };
 
   // Preis separat als Textzeile (kein Badge)
   let preisLine = '';
@@ -393,13 +421,18 @@ function renderEntityRow(entity) {
     }
   }
 
-  const tagBadges = Object.entries(entity.tags || {})
-    .filter(([k]) => !HIDDEN_IN_LIST.has(k))
-    .map(([k, v]) => {
-      const label = k === 'stufe' ? (STUFE_LABELS[v] || `Stufe ${v}`) : v;
-      return `<span class="tag-badge" data-cat="${escHtml(k)}">${escHtml(label)}</span>`;
-    })
-    .join('');
+  // Alle Klassifikations-Tags in fester Reihenfolge — vergeben=farbig, leer=ausgegraut
+  const TAG_DISPLAY_ORDER = Object.keys(State.categories || {}).filter(k => k !== 'preis_id');
+  const tags = entity.tags || {};
+  const tagBadges = TAG_DISPLAY_ORDER.map(k => {
+    const val = tags[k];
+    const catLabel = (State.categories || {})[k] || k;
+    if (val) {
+      const label = k === 'stufe' ? (STUFE_LABELS[val] || val) : val;
+      return `<span class="tag-badge tag-badge-set" data-cat="${escHtml(k)}" title="${escHtml(catLabel)}: ${escHtml(label)}">${escHtml(label)}</span>`;
+    }
+    return `<span class="tag-badge tag-badge-empty" data-cat="${escHtml(k)}" title="${escHtml(catLabel)} (nicht vergeben)">${escHtml(catLabel)}</span>`;
+  }).join('');
 
   row.innerHTML = `
     <div class="entity-icon">${typeIcon(entity.type)}</div>
@@ -412,19 +445,18 @@ function renderEntityRow(entity) {
     <div class="entity-check"><input type="checkbox" ${sel ? 'checked' : ''} /></div>
   `;
 
-  // Klick auf Zeile → Selektion
+  // Klick auf Zeile → Selektion (listId als Schlüssel, id für SketchUp)
   row.addEventListener('click', (e) => {
     if (e.target.tagName === 'INPUT') return;
-    handleRowClick(id, e);
+    handleRowClick(listId, e);
   });
   row.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
     if (e.target.checked) {
-      State.selectedIds.add(id);
+      State.selectedIds.add(listId);
     } else {
-      State.selectedIds.delete(id);
+      State.selectedIds.delete(listId);
     }
     row.classList.toggle('selected', e.target.checked);
-    syncSelectionToSketchUp();
     updateSelectionBar();
     renderTagEditor();
   });
@@ -434,7 +466,6 @@ function renderEntityRow(entity) {
 
 function handleRowClick(id, e) {
   if (e.shiftKey) {
-    // Shift: Range-Selektion
     const ids = State.filteredIds;
     const last = [...State.selectedIds].pop();
     const a = ids.indexOf(last);
@@ -444,17 +475,15 @@ function handleRowClick(id, e) {
       ids.slice(from, to + 1).forEach(i => State.selectedIds.add(i));
     }
   } else if (e.ctrlKey || e.metaKey) {
-    // Ctrl: Toggle
     if (State.selectedIds.has(id)) State.selectedIds.delete(id);
     else State.selectedIds.add(id);
   } else {
-    // Einfachklick: Nur diese Entity
     State.selectedIds = new Set([id]);
   }
   renderEntityList();
-  syncSelectionToSketchUp();
   updateSelectionBar();
   renderTagEditor();
+  // Kein syncSelectionToSketchUp hier – verursacht Echo-Loop über SelectionObserver
 }
 
 function syncSelectionToSketchUp() {
@@ -497,16 +526,33 @@ function renderTagEditor() {
     batchHint.style.display = 'none';
   }
 
+  // list_ids → echte Entities auflösen
+  const selectedListIds = new Set(ids);
+  const selected = State.entities.filter(e => selectedListIds.has(e.list_id || String(e.id)));
+  const firstEnt = selected[0];
+
   const name = ids.length === 1
-    ? (State.entities.find(e => String(e.id) === ids[0])?.name || ids[0])
+    ? (firstEnt?.name || ids[0])
     : `${ids.length} Bauteile`;
   hint.textContent      = name;
   actions.style.display = '';
 
-  const selected = State.entities.filter(e => ids.includes(String(e.id)));
-  const merged   = mergedTags(selected);
+  const merged = mergedTags(selected);
 
   body.innerHTML = '';
+
+  // Bauteil-Namenszeile
+  if (ids.length === 1 && firstEnt) {
+    const nameCard = document.createElement('div');
+    nameCard.className = 'entity-name-card';
+    nameCard.innerHTML = `
+      <span class="entity-name-card-name">${escHtml(firstEnt.name)}</span>
+      <span class="entity-name-card-meta">${escHtml(firstEnt.type)} · Layer: ${escHtml(firstEnt.layer)}</span>
+      ${firstEnt.path?.length ? `<span class="entity-name-card-path">${firstEnt.path.map(escHtml).join(' › ')}</span>` : ''}
+    `;
+    body.appendChild(nameCard);
+  }
+
   body.appendChild(buildTagForm(merged, 'inline'));
   attachDropdowns('inline');
 
@@ -521,56 +567,63 @@ function buildMengenSection(entities, isSingle) {
 
   const title = document.createElement('div');
   title.className   = 'menge-section-title';
-  title.textContent = 'Menge';
+  title.textContent = 'Menge (aus Modell)';
   section.appendChild(title);
 
-  // Auto-berechnete Menge anzeigen (readonly)
+  // Berechnete Menge anzeigen
   if (isSingle && entities[0]?.menge_auto) {
     const autoRow = document.createElement('div');
     autoRow.className = 'menge-auto-row';
     autoRow.innerHTML = `<span class="filter-label">Berechnet</span>
-      <span class="menge-auto-val">${escHtml(entities[0].menge_auto)}</span>`;
+      <span class="menge-auto-val">${escHtml(fmtMenge(entities[0].menge_auto))}</span>`;
     section.appendChild(autoRow);
+  } else if (isSingle) {
+    const hint = document.createElement('div');
+    hint.className = 'menge-auto-row';
+    hint.innerHTML = `<span class="filter-label" style="color:var(--text-hint)">⊞ Mengen berechnen</span>`;
+    section.appendChild(hint);
   }
 
-  // Manuelle Mengen-Eingabe
-  const manField = document.createElement('div');
-  manField.className = 'tag-field';
-  const manLabel = document.createElement('label');
-  manLabel.setAttribute('for', 'inline_menge');
-  manLabel.textContent = 'Menge (manuell)';
-  manField.appendChild(manLabel);
+  // Einheit-Override
+  const einheiten = State.constants?.einheiten || ['m²', 'm³', 'm', 'Stück'];
+  const mergedEinheit = [...new Set(entities.map(e => e.tags?.einheit || ''))];
+  const currentEinheit = mergedEinheit.length === 1 ? mergedEinheit[0] : '';
 
-  const manWrap = document.createElement('div');
-  manWrap.className = 'tag-input-wrap';
+  const einheitRow = document.createElement('div');
+  einheitRow.className = 'menge-auto-row';
 
-  const manInput = document.createElement('input');
-  manInput.type        = 'number';
-  manInput.id          = 'inline_menge';
-  manInput.dataset.cat = 'menge';
-  manInput.step        = 'any';
-  const mergedMenge = [...new Set(entities.map(e => e.tags?.menge || ''))];
-  manInput.value       = mergedMenge.length === 1 ? mergedMenge[0] : '';
-  manInput.placeholder = isSingle && entities[0]?.menge_auto
-    ? `auto: ${entities[0].menge_auto}`
-    : 'z.B. 24.5';
+  const lbl = document.createElement('span');
+  lbl.className   = 'filter-label';
+  lbl.textContent = 'Einheit';
+  einheitRow.appendChild(lbl);
 
-  const clearBtn = document.createElement('button');
-  clearBtn.type      = 'button';
-  clearBtn.className = 'tag-dropdown-btn';
-  clearBtn.title     = 'Manuelle Menge löschen (auto verwenden)';
-  clearBtn.textContent = '✕';
-  clearBtn.addEventListener('click', () => { manInput.value = ''; });
+  const sel = document.createElement('select');
+  sel.id          = 'inline_einheit';
+  sel.dataset.cat = 'einheit';
+  sel.className   = 'tag-filter-select';
+  sel.style.flex  = '1';
 
-  manWrap.appendChild(manInput);
-  manWrap.appendChild(clearBtn);
-  manField.appendChild(manWrap);
-  section.appendChild(manField);
+  const emptyOpt = document.createElement('option');
+  emptyOpt.value       = '';
+  emptyOpt.textContent = '— auto —';
+  sel.appendChild(emptyOpt);
+
+  einheiten.forEach(e => {
+    const opt = document.createElement('option');
+    opt.value       = e;
+    opt.textContent = e;
+    if (e === currentEinheit) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  einheitRow.appendChild(sel);
+  section.appendChild(einheitRow);
 
   return section;
 }
 
 
+function mergedTags(entities) {
   const result = {};
   Object.keys(State.categories).forEach(cat => {
     const vals = [...new Set(entities.map(e => (e.tags && e.tags[cat]) || ''))];
@@ -619,6 +672,7 @@ function buildTagForm(currentTags, prefix) {
     input.type        = 'text';
     input.id          = `${prefix}_${cat}`;
     input.dataset.cat = cat;
+    input.dataset.dirty = 'false';
     input.value       = mixed ? '' : displayVal;
     input.placeholder = mixed
       ? '(gemischt – Eingabe überschreibt alle)'
@@ -657,6 +711,7 @@ function buildTagForm(currentTags, prefix) {
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
           input.classList.remove('mixed');
+          input.dataset.dirty = 'true';
           // Für preis_id: den lesbaren Namen ins Feld, für Speichern die ID merken
           if (cat === 'preis_id') {
             input.value = opt.meta?.bezeichnung || opt.label;
@@ -677,6 +732,7 @@ function buildTagForm(currentTags, prefix) {
       clearItem.addEventListener('mousedown', (e) => {
         e.preventDefault();
         input.value = '';
+        input.dataset.dirty = 'true';
         delete input.dataset.savedValue;
         input.classList.remove('mixed');
         list.style.display = 'none';
@@ -710,6 +766,7 @@ function attachDropdowns(prefix) {
     });
 
     input.addEventListener('input', () => {
+      input.dataset.dirty = 'true';
       // Live-Filter der Dropdown-Items
       const q = input.value.toLowerCase();
       list.querySelectorAll('.tag-dropdown-item:not(.tag-dropdown-clear)').forEach(item => {
@@ -725,6 +782,7 @@ function collectTagsFromForm(prefix) {
   Object.keys(State.categories).forEach(cat => {
     const el = document.getElementById(`${prefix}_${cat}`);
     if (!el) return;
+    if (el.dataset.dirty !== 'true') return; // nur vom Nutzer geänderte Felder senden
     if (cat === 'preis_id') {
       if (el.dataset.savedValue) {
         result['preis_id']     = el.dataset.savedValue;
@@ -738,16 +796,26 @@ function collectTagsFromForm(prefix) {
     }
   });
 
-  // Menge manuell (aus separatem Mengen-Bereich)
-  const mengeEl = document.getElementById(`${prefix}_menge`);
-  if (mengeEl) result['menge'] = mengeEl.value.trim();
+  // Einheit aus Mengen-Bereich
+  const einheitEl = document.getElementById('inline_einheit');
+  if (einheitEl) result['einheit'] = einheitEl.value;
 
   return result;
 }
 
+// list_ids → echte SketchUp entity IDs (Zahlen), dedupliziert
+function getSelectedEntityIds() {
+  const selectedListIds = new Set([...State.selectedIds]);
+  return [...new Set(
+    State.entities
+      .filter(e => selectedListIds.has(e.list_id || String(e.id)))
+      .map(e => Number(e.id))
+  )];
+}
+
 function saveInlineTags() {
   const tags = collectTagsFromForm('inline');
-  const ids  = [...State.selectedIds].map(Number);
+  const ids = getSelectedEntityIds();
   if (!ids.length) return;
   ruby('setTags', { ids, tags });
 }
@@ -758,20 +826,17 @@ function saveInlineTags() {
 // SELECTION BAR
 // ---------------------------------------------------------------------------
 function scrollToEntity(id) {
-  // Kurz warten bis renderEntityList() den DOM aktualisiert hat
-  requestAnimationFrame(() => {
-    const row = document.querySelector(`.entity-row[data-id="${id}"]`);
-    if (row) {
-      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    } else {
-      // Element liegt in einer eingeklappten Gruppe → Gruppe aufklappen und nochmal versuchen
-      expandGroupForEntity(id);
-      requestAnimationFrame(() => {
-        const r = document.querySelector(`.entity-row[data-id="${id}"]`);
-        if (r) r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      });
-    }
-  });
+  const row = document.querySelector(`.entity-row[data-id="${id}"]`);
+  if (row) {
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } else {
+    // Element in eingeklappter Gruppe → alle aufklappen, dann scrollen
+    expandGroupForEntity(id);
+    setTimeout(() => {
+      const r = document.querySelector(`.entity-row[data-id="${id}"]`);
+      if (r) r.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 30);
+  }
 }
 
 // Klappt alle Gruppen-Bodies auf, die das gesuchte Entity enthalten
@@ -793,46 +858,124 @@ function updateSelectionBar() {
   const bar   = document.getElementById('selectionBar');
   const count = document.getElementById('selectionCount');
   const n     = State.selectedIds.size;
-  bar.style.display   = n > 0 ? '' : 'none';
-  count.textContent   = `${n} ausgewählt`;
+  bar.style.display = n > 0 ? '' : 'none';
+  count.textContent = `${n} ausgewählt`;
+}
+
+// ---------------------------------------------------------------------------
+// KENNZAHLEN: Aggregation aus Modellelementen anhand Konfig-Mapping
+// ---------------------------------------------------------------------------
+function matchesFilter(entity, filter) {
+  if (!filter) return false;
+  const fullPath = [...(entity.path || []), entity.name].join('/');
+  // Enthält "/" → Pfad-Filter; sonst exakter Namensvergleich
+  if (filter.includes('/')) return fullPath === filter || fullPath.endsWith('/' + filter);
+  return entity.name === filter;
+}
+
+function getMetricValue(key) {
+  const cfg  = (State.elementMapping && State.elementMapping[key]) || {};
+  const filter = cfg.filter || '';
+  const agg  = cfg.aggregation || 'count';
+  const matches = State.entities.filter(e => matchesFilter(e, filter));
+  if (agg === 'count') return matches.length;
+  // menge_auto summieren
+  return matches.reduce((sum, e) => {
+    const n = parseFloat(String(e.menge_auto || '').replace(',', '.').match(/[\d.,]+/)?.[0]?.replace(',', '.') || '0');
+    return sum + (isNaN(n) ? 0 : n);
+  }, 0);
 }
 
 function updateEntityCount() {
-  const total       = State.entities.length;
-  const classified  = State.entities.filter(isClassified).length;
-  const gewerke     = new Set(State.entities.map(e => e.tags && e.tags['gewerk']).filter(Boolean));
+  const total      = State.entities.length;
+  const classified = State.entities.filter(isClassified).length;
+  const wohnungen  = getMetricValue('wohnungen');
+  State.wohnungenTotal = wohnungen;
   document.getElementById('entityCount').textContent        = total;
   document.getElementById('metaBauteile').textContent       = total;
-  document.getElementById('metaGewerke').textContent        = gewerke.size || '—';
+  document.getElementById('metaWohnungen').textContent      = wohnungen || '—';
   document.getElementById('metaKlassifiziert').textContent  = classified === 0 ? '—' : `${classified} / ${total}`;
+}
+
+function updateAutoMetrics() {
+  const bgf = getMetricValue('bgf');
+  const bri = getMetricValue('bri');
+
+  State.bgfTotal = bgf;
+  State.briTotal = bri;
+
+  if (bgf > 0)
+    document.getElementById('metaBGF').textContent =
+      bgf.toLocaleString('de-DE', { maximumFractionDigits: 0 });
+  if (bri > 0)
+    document.getElementById('metaBRI').textContent =
+      bri.toLocaleString('de-DE', { maximumFractionDigits: 0 });
+}
+
+function resolveEP(tags) {
+  const preisId    = tags.preis_id || '';
+  const preisQuelle = tags.preis_quelle || '';
+  const preise     = State.library?.preise || [];
+
+  if (!preisId) return parseFloat(tags.einheitspreis || '') || 0;
+
+  if (preisQuelle === 'bibliothek') {
+    const obj = preise.find(p => p.id === preisId);
+    if (obj) return parseFloat(obj.ep) || 0;
+  }
+
+  // manuell: preis_id enthält direkt den Zahlenwert
+  const manual = parseFloat(preisId);
+  if (!isNaN(manual) && manual > 0) return manual;
+
+  // Fallback: einheitspreis-Tag
+  return parseFloat(tags.einheitspreis || '') || 0;
+}
+
+function parseMenge(tags, menge_auto) {
+  const mengeStr = tags.menge || '';
+  if (mengeStr) return parseFloat(mengeStr.replace(',', '.')) || 0;
+  const auto = String(menge_auto || '');
+  return parseFloat(auto.match(/[\d.,]+/)?.[0]?.replace(',', '.') || '0') || 0;
 }
 
 function updateCostBanner() {
   if (!State.entities.length) return;
   let total = 0;
-  const preise = State.library?.preise || [];
+  const stufeFilter = State.kostenstufe;
+
+  // Altwerte '1'/'2'/'3' auf neue Bezeichnungen mappen für Rückwärtskompatibilität
+  const STUFE_MIGRATE = { '1': '01 - Kostenprognose', '2': '02 - Kostenschätzung', '3': '03 - Kostenberechnung' };
   State.entities.forEach(e => {
-    const tags    = e.tags || {};
-    const preisId = tags.preis_id || '';
-    let ep = 0;
-    const preisObj = preisId ? preise.find(p => p.id === preisId) : null;
-    if (preisObj) {
-      ep = parseFloat(preisObj.ep) || 0;
-    } else {
-      ep = parseFloat(tags.einheitspreis || '') || 0;
-    }
+    const rawStufe = e.tags?.stufe || '';
+    const normStufe = STUFE_MIGRATE[rawStufe] || rawStufe;
+    if (stufeFilter && normStufe !== stufeFilter) return;
+    const tags  = e.tags || {};
+    const ep    = resolveEP(tags);
     if (ep <= 0) return;
-    const mengeStr  = tags.menge || '';
-    const mengeAuto = e.menge_auto || '';
-    const menge = mengeStr
-      ? parseFloat(mengeStr.replace(',', '.'))
-      : (mengeAuto ? parseFloat(String(mengeAuto).match(/[\d.,]+/)?.[0]?.replace(',', '.') || '0') : 0);
+    const menge = parseMenge(tags, e.menge_auto);
     if (menge > 0) total += menge * ep;
   });
+
   const el = document.getElementById('metaGesamtkosten');
   if (el) el.textContent = total > 0
     ? total.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €'
     : '—';
+
+  updateKostenkennzahlen(total);
+}
+
+function updateKostenkennzahlen(gesamtkosten) {
+  const fmt = (v) => v.toLocaleString('de-DE', { maximumFractionDigits: 0 });
+  const elBGF = document.getElementById('metaEurBGF');
+  const elBRI = document.getElementById('metaEurBRI');
+  const elWohnung = document.getElementById('metaEurWohnung');
+  if (elBGF) elBGF.textContent = (gesamtkosten > 0 && State.bgfTotal > 0)
+    ? fmt(gesamtkosten / State.bgfTotal) + ' €/m²' : '—';
+  if (elBRI) elBRI.textContent = (gesamtkosten > 0 && State.briTotal > 0)
+    ? fmt(gesamtkosten / State.briTotal) + ' €/m³' : '—';
+  if (elWohnung) elWohnung.textContent = (gesamtkosten > 0 && State.wohnungenTotal > 0)
+    ? fmt(gesamtkosten / State.wohnungenTotal) + ' €' : '—';
 }
 
 // ---------------------------------------------------------------------------
@@ -960,6 +1103,23 @@ function typeIcon(type) {
   return map[type] || '○';
 }
 
+// Zahl mit deutscher Formatierung (Komma, Punkt-Tausender, max 2 Nachkommastellen)
+function fmtNum(v, maxDec = 2) {
+  const n = parseFloat(v);
+  if (isNaN(n)) return v != null ? String(v) : '—';
+  return n.toLocaleString('de-DE', { maximumFractionDigits: maxDec });
+}
+
+// Menge-String aus Ruby ("3897.25 m²") in deutsche Schreibweise umwandeln
+function fmtMenge(str) {
+  if (!str) return '—';
+  const m = String(str).match(/^([\d.,]+)\s*(.*)$/);
+  if (!m) return str;
+  const n = parseFloat(m[1].replace(',', '.'));
+  if (isNaN(n)) return str;
+  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + (m[2] ? ' ' + m[2].trim() : '');
+}
+
 function escHtml(str) {
   return String(str).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
@@ -984,26 +1144,17 @@ function showToast(msg, type = 'ok') {
 // EXPORT
 // ---------------------------------------------------------------------------
 function exportCSV() {
-  const cats = Object.keys(State.categories);
-  const header = ['ID', 'Name', 'Typ', 'Layer', ...cats].join(';');
-  const rows = State.entities.map(e => {
-    const tagVals = cats.map(c => e.tags?.[c] || '');
-    return [e.id, e.name, e.type, e.layer, ...tagVals]
-      .map(v => `"${String(v).replace(/"/g, '""')}"`)
-      .join(';');
-  });
-  downloadFile('bim_report.csv', [header, ...rows].join('\n'), 'text/csv');
+  // Strukturierter Export der aktuellen Auswertungsansicht (Gruppierung + Filter)
+  if (typeof exportReportCSVStructured === 'function') {
+    exportReportCSVStructured();
+  }
 }
 
 function exportJSON() {
-  downloadFile('bim_report.json', JSON.stringify(State.entities, null, 2), 'application/json');
-}
-
-function downloadFile(filename, content, mime) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
-  a.download = filename;
-  a.click();
+  ruby('exportCSVFile', {
+    csv: JSON.stringify(State.entities, null, 2),
+    filename: 'bim_report.json',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,8 +1164,6 @@ function downloadFile(filename, content, mime) {
 function bindMetaControls() {
   const fields = [
     { btnId: 'btnEditKosten', inputId: 'inputKosten', valueId: 'metaKosten', key: 'gesamtkosten' },
-    { btnId: 'btnEditBGF',    inputId: 'inputBGF',    valueId: 'metaBGF',    key: 'bgf'          },
-    { btnId: 'btnEditBRI',    inputId: 'inputBRI',    valueId: 'metaBRI',    key: 'bri'          },
   ];
 
   fields.forEach(({ btnId, inputId, valueId }) => {
@@ -1035,7 +1184,6 @@ function bindMetaControls() {
       const inp = document.getElementById(inputId);
       const val = inp.value.trim();
       payload[key] = val;
-      // UI sofort aktualisieren
       document.getElementById(valueId).textContent = val || '—';
       document.getElementById(valueId).style.display = '';
       inp.style.display = 'none';

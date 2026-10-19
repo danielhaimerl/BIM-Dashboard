@@ -59,20 +59,20 @@ module BimDashboard
         { 'id' => 'g009', 'bezeichnung' => 'Elektro' },
       ],
       'kostengruppen' => [
-        { 'id' => 'k300', 'kg' => '300',  'bezeichnung' => 'Bauwerk – Baukonstruktion', 'einheit' => '' },
-        { 'id' => 'k310', 'kg' => '310',  'bezeichnung' => 'Baugrube',                  'einheit' => 'm³' },
-        { 'id' => 'k320', 'kg' => '320',  'bezeichnung' => 'Gründung',                  'einheit' => 'm²' },
-        { 'id' => 'k330', 'kg' => '330',  'bezeichnung' => 'Außenwände',                'einheit' => 'm²' },
-        { 'id' => 'k340', 'kg' => '340',  'bezeichnung' => 'Innenwände',                'einheit' => 'm²' },
-        { 'id' => 'k350', 'kg' => '350',  'bezeichnung' => 'Decken',                    'einheit' => 'm²' },
-        { 'id' => 'k360', 'kg' => '360',  'bezeichnung' => 'Dächer',                    'einheit' => 'm²' },
-        { 'id' => 'k370', 'kg' => '370',  'bezeichnung' => 'Baukonstruktive Einbauten', 'einheit' => 'Stück' },
-        { 'id' => 'k400', 'kg' => '400',  'bezeichnung' => 'Bauwerk – Technische Anlagen', 'einheit' => '' },
-        { 'id' => 'k410', 'kg' => '410',  'bezeichnung' => 'Abwasser/Wasser/Gas',       'einheit' => 'm' },
-        { 'id' => 'k420', 'kg' => '420',  'bezeichnung' => 'Wärmeversorgung',            'einheit' => 'Stück' },
-        { 'id' => 'k430', 'kg' => '430',  'bezeichnung' => 'Raumlufttechnik',            'einheit' => 'm' },
-        { 'id' => 'k440', 'kg' => '440',  'bezeichnung' => 'Elektro',                   'einheit' => 'm' },
-        { 'id' => 'k500', 'kg' => '500',  'bezeichnung' => 'Außenanlagen',              'einheit' => 'm²' },
+        { 'id' => 'k300', 'kg' => '300 Bauwerk – Baukonstruktion',    'einheit' => '' },
+        { 'id' => 'k310', 'kg' => '310 Baugrube',                     'einheit' => 'm³' },
+        { 'id' => 'k320', 'kg' => '320 Gründung',                     'einheit' => 'm²' },
+        { 'id' => 'k330', 'kg' => '330 Außenwände',                   'einheit' => 'm²' },
+        { 'id' => 'k340', 'kg' => '340 Innenwände',                   'einheit' => 'm²' },
+        { 'id' => 'k350', 'kg' => '350 Decken',                       'einheit' => 'm²' },
+        { 'id' => 'k360', 'kg' => '360 Dächer',                       'einheit' => 'm²' },
+        { 'id' => 'k370', 'kg' => '370 Baukonstruktive Einbauten',    'einheit' => 'Stück' },
+        { 'id' => 'k400', 'kg' => '400 Bauwerk – Technische Anlagen', 'einheit' => '' },
+        { 'id' => 'k410', 'kg' => '410 Abwasser/Wasser/Gas',          'einheit' => 'm' },
+        { 'id' => 'k420', 'kg' => '420 Wärmeversorgung',              'einheit' => 'Stück' },
+        { 'id' => 'k430', 'kg' => '430 Raumlufttechnik',              'einheit' => 'm' },
+        { 'id' => 'k440', 'kg' => '440 Elektro',                      'einheit' => 'm' },
+        { 'id' => 'k500', 'kg' => '500 Außenanlagen',                 'einheit' => 'm²' },
       ],
       'materialien' => [
         { 'id' => 'm001', 'bezeichnung' => 'Beton' },
@@ -86,10 +86,11 @@ module BimDashboard
         { 'id' => 'm009', 'bezeichnung' => 'PVC' },
       ],
       'stufen' => [
-        { 'id' => 's1', 'bezeichnung' => '1', 'beschreibung' => 'Stufe 1 – Kennwerte (BGF/BRI)' },
-        { 'id' => 's2', 'bezeichnung' => '2', 'beschreibung' => 'Stufe 2 – Flächen (DIN 276)' },
-        { 'id' => 's3', 'bezeichnung' => '3', 'beschreibung' => 'Stufe 3 – Bauteile (Geometrie)' },
+        { 'id' => 's1', 'bezeichnung' => '01 - Kostenschätzung',           'beschreibung' => '' },
+        { 'id' => 's2', 'bezeichnung' => '02 - Kostenberechnung Benchmark', 'beschreibung' => '' },
+        { 'id' => 's3', 'bezeichnung' => '03 - Kostenberechnung Bauteile',  'beschreibung' => '' },
       ],
+      'verortung' => [],
     }.freeze
 
     # ---------------------------------------------------------------------------
@@ -150,6 +151,11 @@ module BimDashboard
       @data['stufen'] || []
     end
 
+    def self.verortung
+      ensure_loaded
+      @data['verortung'] || []
+    end
+
     # Alle Listen als Hash für JS
     def self.all_as_hash
       {
@@ -158,6 +164,7 @@ module BimDashboard
         'kostengruppen' => kostengruppen,
         'materialien'   => materialien,
         'stufen'        => stufen,
+        'verortung'     => verortung,
       }
     end
 

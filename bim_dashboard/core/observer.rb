@@ -32,7 +32,6 @@ module BimDashboard
 
     def push_selection(selection)
       ids = selection.map(&:entityID)
-      # Nur alle 50ms senden um Flooding bei Drag-Select zu vermeiden
       @bridge.call_js('onSketchupSelectionChanged', ids)
     end
 

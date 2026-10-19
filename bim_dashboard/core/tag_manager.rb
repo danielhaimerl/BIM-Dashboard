@@ -46,7 +46,7 @@ module BimDashboard
 
     def self.collect_all_entities(model = Sketchup.active_model)
       results = []
-      traverse_entities(model.entities, results, [])
+      traverse_entities(model.entities, results, [], 0, Geom::Transformation.new)
       results
     end
 
@@ -67,13 +67,15 @@ module BimDashboard
     def self.all_entities_as_json
       require 'json'
       entities = collect_all_entities
-      entities.map { |e, path| entity_to_hash(e, path) }.to_json
+      entities.each_with_index.map do |(e, path, _world_t), i|
+        entity_to_hash(e, path).merge('list_id' => "#{e.entityID}_#{i}")
+      end.to_json
     end
 
     # Gibt alle eindeutigen Werte einer Kategorie zurück (für Dropdowns)
     def self.distinct_values(category)
       collect_all_entities
-        .map { |e, _| e.get_attribute(DICT_NAME, category).to_s }
+        .map { |e, _path, _t| e.get_attribute(DICT_NAME, category).to_s }
         .reject(&:empty?)
         .uniq
         .sort
@@ -81,18 +83,24 @@ module BimDashboard
 
     private
 
-    def self.traverse_entities(entities, results, path)
+    # Traversiert rekursiv und akkumuliert die Welt-Transformation über alle Eltern.
+    # Jedes Ergebnis-Tupel: [entity, path, world_transform]
+    # Die world_transform wird in der Mengenberechnung verwendet, damit Skalierungen
+    # übergeordneter Container-Gruppen korrekt berücksichtigt werden.
+    def self.traverse_entities(entities, results, path, depth = 0, world_transform = Geom::Transformation.new)
       entities.each do |e|
         case e
         when Sketchup::Group
-          results << [e, path.dup]
-          traverse_entities(e.entities, results, path + [entity_name(e)])
+          local_to_world = world_transform * e.transformation
+          has_sub_groups = e.entities.any? { |c| c.is_a?(Sketchup::Group) || c.is_a?(Sketchup::ComponentInstance) }
+          results << [e, path.dup, local_to_world] if depth > 0 && !has_sub_groups
+          traverse_entities(e.entities, results, path + [entity_name(e)], depth + 1, local_to_world)
         when Sketchup::ComponentInstance
-          results << [e, path.dup]
-          traverse_entities(e.definition.entities, results, path + [entity_name(e)])
+          local_to_world = world_transform * e.transformation
+          traverse_entities(e.definition.entities, results, path + [entity_name(e)], depth + 1, local_to_world)
         when Sketchup::Face, Sketchup::Edge
           tags = get_tags(e)
-          results << [e, path.dup] unless tags.empty?
+          results << [e, path.dup, world_transform] unless tags.empty?
         end
       end
     end

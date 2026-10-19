@@ -3,9 +3,9 @@
 # Datei: core/quantity_calculator.rb
 #
 # Berechnet Mengen aus SketchUp-Geometrie.
-# WICHTIG: Berücksichtigt Transformationen (Skalierung, Rotation).
-# SketchUp speichert skalierte Gruppen mit Transformationsmatrix —
-# face.area gibt untransformierte Werte zurück, muss mit Skala multipliziert werden.
+# WICHTIG: Transformationsmatrix wird vollständig angewendet (nicht nur Skalierung).
+# face.area gibt untransformierte Werte zurück → Vertices transformieren und
+# dann Fläche/Volumen aus den Weltkoordinaten berechnen.
 # =============================================================================
 
 module BimDashboard
@@ -18,10 +18,17 @@ module BimDashboard
     # -------------------------------------------------------------------------
     # Hauptmethode
     # -------------------------------------------------------------------------
-    def self.calculate(entity)
+    def self.calculate(entity, world_transform = nil)
+      hint = entity.get_attribute(DICT_NAME, 'einheit').to_s.strip
+      # Welt-Transformation: akkumuliert alle Eltern-Skalierungen/-Rotationen.
+      # Korrekt für beliebige Verschachtelungstiefe (z.B. Blatt in 3 Container-Gruppen).
+      wt = world_transform || (entity.respond_to?(:transformation) ? entity.transformation : Geom::Transformation.new)
+
       case entity
-      when Sketchup::Group, Sketchup::ComponentInstance
-        calculate_group(entity, entity.transformation)
+      when Sketchup::Group
+        calculate_group_entities(entity.entities, wt, hint)
+      when Sketchup::ComponentInstance
+        calculate_group_entities(entity.definition.entities, wt, hint)
       when Sketchup::Face
         { value: to_m2(entity.area), unit: 'm²', method: 'area', reliable: true }
       when Sketchup::Edge
@@ -31,18 +38,25 @@ module BimDashboard
       end
     end
 
-    def self.calculate_and_store_batch(entities)
+    # Akzeptiert entweder reine Entity-Objekte oder 3-Tupel [entity, path, world_transform]
+    # aus TagManager.collect_all_entities (empfohlen, da world_transform Eltern-Skalierungen enthält).
+    def self.calculate_and_store_batch(items)
       model = Sketchup.active_model
       model.start_operation('BIM Mengen berechnen', true)
       results = []
-      puts "[BIM Mengen] Berechne #{entities.size} Entities..."
+      puts "[BIM Mengen] Berechne #{items.size} Entities..."
       begin
-        entities.each do |e|
-          result = calculate(e)
+        items.each do |item|
+          e, world_t = item.is_a?(Array) ? [item[0], item[2]] : [item, nil]
 
-          # Einheit aus Tag hat Vorrang
+          result = calculate(e, world_t)
+
           tag_einheit = e.get_attribute(DICT_NAME, 'einheit').to_s.strip
-          result = result.merge(unit: tag_einheit) if tag_einheit != ''
+          if tag_einheit == 'Stück' || tag_einheit == 'St'
+            result = { value: 1, unit: tag_einheit, method: 'count', reliable: true }
+          elsif tag_einheit != '' && result[:unit] != tag_einheit
+            result = result.merge(unit: tag_einheit)
+          end
 
           menge_str = "#{format_value(result[:value])} #{result[:unit]}"
           e.set_attribute(DICT_NAME, 'menge_auto', menge_str)
@@ -66,92 +80,133 @@ module BimDashboard
     private
 
     # -------------------------------------------------------------------------
-    # Gruppe mit Transformation berechnen
+    # Gruppe/Komponente mit Transformation berechnen
     # -------------------------------------------------------------------------
-    def self.calculate_group(group, transform)
-      tag_einheit = group.get_attribute(DICT_NAME, 'einheit').to_s.strip
-      entities = group.is_a?(Sketchup::Group) ? group.entities : group.definition.entities
-      calculate_group_entities(entities, transform, tag_einheit)
-    end
-
     def self.calculate_group_entities(entities, transform, hint_einheit = '')
-      # Skalierungsfaktoren aus Transformation extrahieren
-      sx = transform.xaxis.length   # Skalierung X-Achse
-      sy = transform.yaxis.length   # Skalierung Y-Achse
-      sz = transform.zaxis.length   # Skalierung Z-Achse
-
       faces = entities.grep(Sketchup::Face)
       edges = entities.grep(Sketchup::Edge)
 
-      # --- Stück: immer 1 pro Bauteil ---
-      if hint_einheit =~ /\ASt/i
-        return { value: 1.0, unit: hint_einheit, method: 'count', reliable: true }
+      # --- m Länge (nur Kanten, keine Faces) ---
+      # MUSS vor dem faces.empty?-Frühausstieg stehen, damit Linien-Platzhalter
+      # nicht als Fallback 1 Stück zurückgeben.
+      # Bounding-Box statt Kantensumme: Querstriche/Endmarker werden so ignoriert.
+      if edges.any? && faces.empty?
+        all_verts = edges.flat_map { |e| [e.start, e.end] }
+        len = bounding_box_longest_axis(all_verts, transform)
+        return { value: to_m(len), unit: 'm', method: 'bbox_length', reliable: true } if len > 0
       end
 
-      # --- m Länge: längste Ausdehnung (Endmarkierungen etc. zählen nicht mit) ---
-      if hint_einheit == 'm'
-        length = extents_of(entities, sx, sy, sz).max
-        return { value: to_m(length), unit: 'm', method: 'extent', reliable: true } if length > 0
+      # Keine direkten Faces → Sub-Gruppen durchsuchen
+      if faces.empty?
+        result = calculate_nested(entities, transform, hint_einheit)
+        return result if result
+        return fallback
       end
 
       # --- m³ Volumen ---
-      if hint_einheit == 'm³' || hint_einheit == 'm3' || hint_einheit == ''
-        if solid_entities?(entities)
-          vol = volume_of_entities(entities, sx, sy, sz)
-          if vol && vol > 0
-            return { value: to_m3(vol), unit: 'm³', method: 'volume', reliable: true }
-          end
-          # Fallback Bounding Box Volumen (bei skalierten Würfeln sehr genau)
-          b = bounding_box_of(entities, sx, sy, sz)
-          if b > 0 && hint_einheit == 'm³'
-            return { value: to_m3(b), unit: 'm³', method: 'bbox_volume', reliable: true }
-          end
+      wants_volume = hint_einheit == 'm³' || hint_einheit == 'm3' || hint_einheit == ''
+      if wants_volume && solid_entities?(faces)
+        vol = volume_of_faces(faces, transform)
+        if vol && vol > 0
+          return { value: to_m3(vol), unit: 'm³', method: 'volume', reliable: true }
         end
+        # Fallback: Bounding-Box-Volumen
+        bb_vol = bounding_box_volume(faces, transform)
+        if bb_vol > 0 && hint_einheit == 'm³'
+          return { value: to_m3(bb_vol), unit: 'm³', method: 'bbox_volume', reliable: true }
+        end
+      end
+
+      # --- m Länge (explizit angefordert, Geometrie mit Faces) ---
+      if hint_einheit == 'm'
+        all_verts = faces.flat_map { |f| f.vertices } + edges.flat_map { |e| [e.start, e.end] }
+        len = bounding_box_longest_axis(all_verts, transform)
+        return { value: to_m(len), unit: 'm', method: 'bbox_length', reliable: true } if len > 0
       end
 
       # --- m² Fläche ---
       if faces.any?
-        # face.area ist in Zoll² ohne Transformation
-        # Bei skalierter Gruppe: mit sx*sy multiplizieren
-        # Für eine planare Fläche (z.B. BGF-Fläche) ist das korrekt
-        area = faces.sum do |f|
-          # Normale bestimmt welche Achsen die Fläche aufspannen
-          n = f.normal
-          if n.z.abs > 0.9       # horizontale Fläche (XY-Ebene)
-            f.area * sx * sy
-          elsif n.y.abs > 0.9    # vertikale Fläche (XZ-Ebene)
-            f.area * sx * sz
-          elsif n.x.abs > 0.9    # vertikale Fläche (YZ-Ebene)
-            f.area * sy * sz
-          else
-            # Schräge Fläche: allgemeine Skalierung
-            f.area * Math.sqrt((sx*sy)**2 + (sy*sz)**2 + (sx*sz)**2) / Math.sqrt(3)
-          end
+        if solid_entities?(faces)
+          area = faces.map { |f| transformed_face_area(f, transform) }.max
+        else
+          area = faces.sum { |f| transformed_face_area(f, transform) }
         end
-        # Bei Solid: nur äußere Flächen (Hülle) → Gesamtfläche / 2
-        # Bei einzelner Fläche: direkt verwenden
-        if solid_entities?(entities) && hint_einheit != 'm²'
-          # Das ist ein Solid → Volumen bevorzugen (bereits oben behandelt)
-          # Wenn wir hier ankommen: Volumen nicht berechnet, Fläche als Fallback
-          area = area / 2.0  # Näherung äußere Hülle
-        end
-        return { value: to_m2(area), unit: 'm²', method: 'area', reliable: true } if area > 0
-      end
-
-      # --- m Länge ---
-      if edges.any? && faces.empty?
-        length = edges.sum { |e| e.length * sx }
-        return { value: to_m(length), unit: 'm', method: 'length', reliable: true } if length > 0
+        return { value: to_m2(area), unit: 'm²', method: 'area', reliable: true } if area && area > 0
       end
 
       fallback
     end
 
+    # Wenn eine Gruppe keine direkten Faces hat, Sub-Gruppen/Komponenten zusammenfassen
+    def self.calculate_nested(entities, transform, hint_einheit)
+      sub = entities.select { |e| e.is_a?(Sketchup::Group) || e.is_a?(Sketchup::ComponentInstance) }
+      return nil if sub.empty?
+
+      total_vol  = 0.0
+      total_area = 0.0
+      total_len  = 0.0
+      method_used = nil
+
+      sub.each do |s|
+        sub_entities = s.is_a?(Sketchup::Group) ? s.entities : s.definition.entities
+        sub_transform = transform * s.transformation
+        r = calculate_group_entities(sub_entities, sub_transform, hint_einheit)
+        next if r[:method] == 'count'
+        case r[:unit]
+        when 'm³' then total_vol  += r[:value]; method_used = r[:method]
+        when 'm²' then total_area += r[:value]; method_used = r[:method]
+        when 'm'  then total_len  += r[:value]; method_used = r[:method]
+        end
+      end
+
+      return { value: total_vol,  unit: 'm³', method: method_used || 'volume', reliable: true } if total_vol  > 0
+      return { value: total_area, unit: 'm²', method: method_used || 'area',   reliable: true } if total_area > 0
+      return { value: total_len,  unit: 'm',  method: method_used || 'length', reliable: true } if total_len  > 0
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # Flächenberechnung via Newell-Methode auf transformierten Vertices
+    # Korrekt für beliebige Rotation + Skalierung
+    # -------------------------------------------------------------------------
+    def self.transformed_face_area(face, transform)
+      verts = face.outer_loop.vertices.map { |v| transform * v.position }
+      polygon_area_3d(verts)
+    rescue
+      0.0
+    end
+
+    # Newell-Methode: Fläche eines beliebigen 3D-Polygons
+    def self.polygon_area_3d(pts)
+      return 0.0 if pts.length < 3
+      nx = ny = nz = 0.0
+      n = pts.length
+      pts.each_with_index do |p, i|
+        q = pts[(i + 1) % n]
+        nx += (p.y - q.y) * (p.z + q.z)
+        ny += (p.z - q.z) * (p.x + q.x)
+        nz += (p.x - q.x) * (p.y + q.y)
+      end
+      Math.sqrt(nx * nx + ny * ny + nz * nz) / 2.0
+    rescue
+      0.0
+    end
+
+    # -------------------------------------------------------------------------
+    # Kanten-Länge nach Transformation
+    # -------------------------------------------------------------------------
+    def self.transformed_edge_length(edge, transform)
+      p0 = transform * edge.start.position
+      p1 = transform * edge.end.position
+      p0.distance(p1)
+    rescue
+      0.0
+    end
+
     # -------------------------------------------------------------------------
     # Solid-Erkennung
     # -------------------------------------------------------------------------
-    def self.solid_entities?(entities)
-      faces = entities.grep(Sketchup::Face)
+    def self.solid_entities?(faces)
       return false if faces.empty?
       faces.all? { |f| f.edges.all? { |e| e.faces.length == 2 } }
     rescue
@@ -159,23 +214,20 @@ module BimDashboard
     end
 
     # -------------------------------------------------------------------------
-    # Volumen via Divergenz-Theorem (korrekt für skalierte Geometrie)
+    # Volumen via Divergenz-Theorem auf transformierten Punkten
+    # Korrekt für beliebige affine Transformationen (Rotation + Skalierung)
     # -------------------------------------------------------------------------
-    def self.volume_of_entities(entities, sx, sy, sz)
+    def self.volume_of_faces(faces, transform)
       vol = 0.0
-      entities.grep(Sketchup::Face).each do |face|
+      faces.each do |face|
         mesh = face.mesh
         (1..mesh.count_polygons).each do |i|
-          pts = mesh.polygon_points_at(i)
+          pts = mesh.polygon_points_at(i).map { |p| transform * p }
           next unless pts.length >= 3
-          # Punkte mit Skalierung transformieren
-          p0 = [pts[0].x * sx, pts[0].y * sy, pts[0].z * sz]
-          p1 = [pts[1].x * sx, pts[1].y * sy, pts[1].z * sz]
-          p2 = [pts[2].x * sx, pts[2].y * sy, pts[2].z * sz]
-          # Signed Tetraeder-Volumen
-          vol += p0[0] * (p1[1] * p2[2] - p1[2] * p2[1]) +
-                 p0[1] * (p1[2] * p2[0] - p1[0] * p2[2]) +
-                 p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])
+          p0, p1, p2 = pts[0], pts[1], pts[2]
+          vol += p0.x * (p1.y * p2.z - p1.z * p2.y) +
+                 p0.y * (p1.z * p2.x - p1.x * p2.z) +
+                 p0.z * (p1.x * p2.y - p1.y * p2.x)
         end
       end
       (vol / 6.0).abs
@@ -184,23 +236,59 @@ module BimDashboard
     end
 
     # -------------------------------------------------------------------------
-    # Bounding Box Volumen (skaliert)
+    # Bounding-Box-Volumen aus transformierten Vertices
     # -------------------------------------------------------------------------
-    def self.bounding_box_of(entities, sx, sy, sz)
-      extents_of(entities, sx, sy, sz).reduce(:*)
+    def self.bounding_box_volume(faces, transform)
+      pts = faces.flat_map { |f| f.vertices.map { |v| transform * v.position } }
+      return 0 if pts.empty?
+      xs = pts.map(&:x); ys = pts.map(&:y); zs = pts.map(&:z)
+      (xs.max - xs.min) * (ys.max - ys.min) * (zs.max - zs.min)
+    rescue
+      0
     end
 
-    # Skalierte Ausdehnung [dx, dy, dz] über alle Kanten-Endpunkte
-    def self.extents_of(entities, sx, sy, sz)
-      pts = entities.grep(Sketchup::Edge).flat_map { |e| e.vertices.map(&:position) }
-      return [0, 0, 0] if pts.empty?
-      [
-        (pts.map(&:x).max - pts.map(&:x).min) * sx,
-        (pts.map(&:y).max - pts.map(&:y).min) * sy,
-        (pts.map(&:z).max - pts.map(&:z).min) * sz,
-      ]
+    # -------------------------------------------------------------------------
+    # Alle Vertices eines Entities rekursiv in Weltkoordinaten sammeln.
+    # Verwendet die akkumulierte Welt-Transformation (inkl. aller Eltern-Skalierungen).
+    # -------------------------------------------------------------------------
+    def self.world_vertices(entity, transform)
+      pts = []
+      collect_verts(entity, transform, pts)
+      pts
     rescue
-      [0, 0, 0]
+      []
+    end
+
+    def self.collect_verts(entity, transform, pts)
+      children = case entity
+                 when Sketchup::Group            then entity.entities
+                 when Sketchup::ComponentInstance then entity.definition.entities
+                 else return
+                 end
+      children.each do |e|
+        case e
+        when Sketchup::Group, Sketchup::ComponentInstance
+          collect_verts(e, transform * e.transformation, pts)
+        when Sketchup::Face
+          e.outer_loop.vertices.each { |v| pts << (transform * v.position) }
+        when Sketchup::Edge
+          pts << (transform * e.start.position)
+          pts << (transform * e.end.position)
+        end
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # Längste Achse der Bounding Box transformierter Vertices
+    # Für lineare Bauteile mit expliziter Einheit 'm'
+    # -------------------------------------------------------------------------
+    def self.bounding_box_longest_axis(vertices, transform)
+      pts = vertices.map { |v| transform * v.position }
+      return 0.0 if pts.empty?
+      xs = pts.map(&:x); ys = pts.map(&:y); zs = pts.map(&:z)
+      [xs.max - xs.min, ys.max - ys.min, zs.max - zs.min].max
+    rescue
+      0.0
     end
 
     # -------------------------------------------------------------------------

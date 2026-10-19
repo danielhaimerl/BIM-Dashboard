@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Gebäude-Viewer (Three.js)</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: Segoe UI, Arial, sans-serif; }
+  #app { display: flex; height: 100vh; width: 100vw; }
+  #panel {
+    width: 300px;
+    background: #f4f6f8;
+    border-right: 1px solid #d7dce1;
+    padding: 16px;
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+  #panel h2 { font-size: 16px; margin: 0 0 12px; color: #2c3e50; }
+  #panel h3 { font-size: 13px; margin: 18px 0 8px; color: #34495e; border-bottom: 1px solid #d7dce1; padding-bottom: 4px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; color: #555; margin-bottom: 3px; }
+  .field input[type=number] {
+    width: 100%; padding: 5px 6px; box-sizing: border-box;
+    border: 1px solid #c6cdd3; border-radius: 4px; font-size: 13px;
+  }
+  .field input[type=color] { width: 100%; height: 28px; border: 1px solid #c6cdd3; border-radius: 4px; padding: 2px; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 .field { flex: 1; }
+  .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #444; margin-bottom: 6px; }
+  button {
+    width: 100%; padding: 8px; margin-top: 4px;
+    background: #2c7be5; color: #fff; border: none; border-radius: 4px;
+    font-size: 13px; cursor: pointer;
+  }
+  button:hover { background: #1f64c4; }
+  button.secondary { background: #6c757d; }
+  button.secondary:hover { background: #565e64; }
+  #viewer { flex: 1; position: relative; }
+  #viewer canvas { display: block; }
+  #info {
+    position: absolute; bottom: 10px; left: 10px;
+    background: rgba(255,255,255,0.85); padding: 8px 12px; border-radius: 6px;
+    font-size: 12px; color: #2c3e50; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h2>Gebäudeparameter</h2>
+
+    <h3>Abmessungen</h3>
+    <div class="row2">
+      <div class="field">
+        <label>Länge (m)</label>
+        <input type="number" id="length" value="20" step="0.5" min="1">
+      </div>
+      <div class="field">
+        <label>Breite (m)</label>
+        <input type="number" id="width" value="12" step="0.5" min="1">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Geschosse</label>
+        <input type="number" id="floors" value="3" step="1" min="1">
+      </div>
+      <div class="field">
+        <label>Geschosshöhe (m)</label>
+        <input type="number" id="floorHeight" value="3" step="0.1" min="1.5">
+      </div>
+    </div>
+    <div class="field">
+      <label>Dachform</label>
+      <select id="roofType" style="width:100%; padding:5px; border:1px solid #c6cdd3; border-radius:4px;">
+        <option value="flat">Flachdach</option>
+        <option value="gable">Satteldach</option>
+        <option value="hip">Walmdach</option>
+      </select>
+    </div>
+    <div class="field" id="roofHeightField">
+      <label>Dachhöhe (m)</label>
+      <input type="number" id="roofHeight" value="2" step="0.1" min="0">
+    </div>
+
+    <h3>Fassade</h3>
+    <div class="field">
+      <label>Wandfarbe</label>
+      <input type="color" id="wallColor" value="#d8d3c4">
+    </div>
+    <div class="field">
+      <label>Dachfarbe</label>
+      <input type="color" id="roofColor" value="#7a4f3a">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Fenster pro Längsseite</label>
+        <input type="number" id="windowsLong" value="6" step="1" min="0">
+      </div>
+      <div class="field">
+        <label>Fenster pro Breitseite</label>
+        <input type="number" id="windowsShort" value="3" step="1" min="0">
+      </div>
+    </div>
+
+    <h3>Anzeige / Filter</h3>
+    <div class="toggle"><input type="checkbox" id="showWalls" checked> <label for="showWalls">Wände</label></div>
+    <div class="toggle"><input type="checkbox" id="showRoof" checked> <label for="showRoof">Dach</label></div>
+    <div class="toggle"><input type="checkbox" id="showWindows" checked> <label for="showWindows">Fenster</label></div>
+    <div class="toggle"><input type="checkbox" id="showFloors" checked> <label for="showFloors">Geschossdecken</label></div>
+    <div class="toggle"><input type="checkbox" id="showGround" checked> <label for="showGround">Boden / Grundstück</label></div>
+    <div class="toggle"><input type="checkbox" id="wireframe"> <label for="wireframe">Drahtgitter</label></div>
+
+    <button id="rebuildBtn">Modell aktualisieren</button>
+    <button id="resetViewBtn" class="secondary">Ansicht zurücksetzen</button>
+  </div>
+  <div id="viewer">
+    <div id="info"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const viewerEl = document.getElementById('viewer');
+const infoEl = document.getElementById('info');
+
+// --- Scene basics ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9edf1);
+
+const camera = new THREE.PerspectiveCamera(50, viewerEl.clientWidth / viewerEl.clientHeight, 0.1, 2000);
+camera.position.set(30, 25, 35);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
+viewerEl.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 3, 0);
+controls.enableDamping = true;
+
+// Lights
+const hemi = new THREE.HemisphereLight(0xffffff, 0x44464a, 1.0);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(40, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -50;
+sun.shadow.camera.right = 50;
+sun.shadow.camera.top = 50;
+sun.shadow.camera.bottom = -50;
+scene.add(sun);
+
+// Grid + axes helper
+const grid = new THREE.GridHelper(80, 80, 0xb0b6bd, 0xd4d8dc);
+scene.add(grid);
+
+// Group that holds the building, rebuilt on demand
+let buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+
+function getParams() {
+  return {
+    length: parseFloat(document.getElementById('length').value) || 1,
+    width: parseFloat(document.getElementById('width').value) || 1,
+    floors: Math.max(1, parseInt(document.getElementById('floors').value) || 1),
+    floorHeight: parseFloat(document.getElementById('floorHeight').value) || 1,
+    roofType: document.getElementById('roofType').value,
+    roofHeight: parseFloat(document.getElementById('roofHeight').value) || 0,
+    wallColor: document.getElementById('wallColor').value,
+    roofColor: document.getElementById('roofColor').value,
+    windowsLong: Math.max(0, parseInt(document.getElementById('windowsLong').value) || 0),
+    windowsShort: Math.max(0, parseInt(document.getElementById('windowsShort').value) || 0),
+    showWalls: document.getElementById('showWalls').checked,
+    showRoof: document.getElementById('showRoof').checked,
+    showWindows: document.getElementById('showWindows').checked,
+    showFloors: document.getElementById('showFloors').checked,
+    showGround: document.getElementById('showGround').checked,
+    wireframe: document.getElementById('wireframe').checked,
+  };
+}
+
+function buildWindowsOnFace(parent, faceWidth, faceHeight, count, wallThickness, axis, offset, totalHeight) {
+  if (count <= 0) return;
+  const winW = Math.min(1.2, faceWidth / (count * 2));
+  const winH = Math.min(1.4, faceHeight - 1);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x9fd0e8, metalness: 0.2, roughness: 0.1 });
+  const geo = new THREE.BoxGeometry(
+    axis === 'x' ? winW : wallThickness * 1.4,
+    winH,
+    axis === 'x' ? wallThickness * 1.4 : winW
+  );
+  const spacing = faceWidth / (count + 1);
+  for (let f = 0; f < (totalHeight ? Math.round(totalHeight) : 1); f++) {
+    // placeholder loop variable not used; windows placed per floor by caller
+  }
+  for (let i = 0; i < count; i++) {
+    const mesh = new THREE.Mesh(geo, mat);
+    const pos = -faceWidth / 2 + spacing * (i + 1);
+    if (axis === 'x') {
+      mesh.position.set(pos, offset, 0);
+    } else {
+      mesh.position.set(0, offset, pos);
+    }
+    parent.add(mesh);
+  }
+}
+
+function buildBuilding(params) {
+  buildingGroup.clear();
+
+  const L = params.length;
+  const W = params.width;
+  const floorH = params.floorHeight;
+  const floors = params.floors;
+  const totalWallHeight = floorH * floors;
+  const wallThickness = 0.25;
+
+  const wallMat = new THREE.MeshStandardMaterial({ color: params.wallColor, wireframe: params.wireframe });
+  const roofMat = new THREE.MeshStandardMaterial({ color: params.roofColor, wireframe: params.wireframe });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xb9bec4, wireframe: params.wireframe });
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x8fae6c });
+
+  // Ground
+  if (params.showGround) {
+    const groundGeo = new THREE.BoxGeometry(L * 2, 0.1, W * 2);
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.position.y = -0.05;
+    ground.receiveShadow = true;
+    buildingGroup.add(ground);
+  }
+
+  // Walls (as a hollow box: 4 thin walls per floor block, simplified as one extruded shell using BoxGeometry minus inner via simple 4 walls)
+  if (params.showWalls) {
+    const wallsGroup = new THREE.Group();
+
+    // Front/back walls (along X), Left/right walls (along Z)
+    const frontGeo = new THREE.BoxGeometry(L, totalWallHeight, wallThickness);
+    const sideGeo = new THREE.BoxGeometry(wallThickness, totalWallHeight, W);
+
+    const front = new THREE.Mesh(frontGeo, wallMat);
+    front.position.set(0, totalWallHeight / 2, W / 2 - wallThickness / 2);
+    front.castShadow = true; front.receiveShadow = true;
+    wallsGroup.add(front);
+
+    const back = new THREE.Mesh(frontGeo, wallMat);
+    back.position.set(0, totalWallHeight / 2, -W / 2 + wallThickness / 2);
+    back.castShadow = true; back.receiveShadow = true;
+    wallsGroup.add(back);
+
+    const left = new THREE.Mesh(sideGeo, wallMat);
+    left.position.set(-L / 2 + wallThickness / 2, totalWallHeight / 2, 0);
+    left.castShadow = true; left.receiveShadow = true;
+    wallsGroup.add(left);
+
+    const right = new THREE.Mesh(sideGeo, wallMat);
+    right.position.set(L / 2 - wallThickness / 2, totalWallHeight / 2, 0);
+    right.castShadow = true; right.receiveShadow = true;
+    wallsGroup.add(right);
+
+    buildingGroup.add(wallsGroup);
+
+    // Windows per floor on front/back (long sides) and left/right (short sides)
+    if (params.showWindows) {
+      for (let fl = 0; fl < floors; fl++) {
+        const winY = floorH * fl + floorH / 2;
+        buildWindowsOnFace(front, L, floorH, params.windowsLong, wallThickness, 'x', winY, 1);
+        buildWindowsOnFace(back, L, floorH, params.windowsLong, wallThickness, 'x', winY, 1);
+        buildWindowsOnFace(left, W, floorH, params.windowsShort, wallThickness, 'z', winY, 1);
+        buildWindowsOnFace(right, W, floorH, params.windowsShort, wallThickness, 'z', winY, 1);
+      }
+    }
+  }
+
+  // Floor slabs between storeys
+  if (params.showFloors) {
+    for (let fl = 1; fl < floors; fl++) {
+      const slabGeo = new THREE.BoxGeometry(L - wallThickness * 2, 0.15, W - wallThickness * 2);
+      const slab = new THREE.Mesh(slabGeo, floorMat);
+      slab.position.y = floorH * fl;
+      slab.castShadow = true; slab.receiveShadow = true;
+      buildingGroup.add(slab);
+    }
+    // ground floor slab
+    const baseSlabGeo = new THREE.BoxGeometry(L, 0.15, W);
+    const baseSlab = new THREE.Mesh(baseSlabGeo, floorMat);
+    baseSlab.position.y = 0;
+    baseSlab.receiveShadow = true;
+    buildingGroup.add(baseSlab);
+  }
+
+  // Roof
+  if (params.showRoof) {
+    const roofBaseY = totalWallHeight;
+    if (params.roofType === 'flat' || params.roofHeight <= 0) {
+      const roofGeo = new THREE.BoxGeometry(L + 0.4, 0.3, W + 0.4);
+      const roof = new THREE.Mesh(roofGeo, roofMat);
+      roof.position.y = roofBaseY + 0.15;
+      roof.castShadow = true; roof.receiveShadow = true;
+      buildingGroup.add(roof);
+    } else if (params.roofType === 'gable') {
+      const shape = new THREE.Shape();
+      shape.moveTo(-W / 2 - 0.3, 0);
+      shape.lineTo(0, params.roofHeight);
+      shape.lineTo(W / 2 + 0.3, 0);
+      shape.lineTo(-W / 2 - 0.3, 0);
+      const extrudeSettings = { depth: L + 0.4, bevelEnabled: false };
+      const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+      geo.rotateY(Math.PI / 2);
+      geo.translate(0, roofBaseY, -(L + 0.4) / 2);
+      const roof = new THREE.Mesh(geo, roofMat);
+      roof.castShadow = true; roof.receiveShadow = true;
+      buildingGroup.add(roof);
+    } else if (params.roofType === 'hip') {
+      const geo = new THREE.ConeGeometry(Math.max(L, W) / 1.6, params.roofHeight, 4, 1);
+      geo.rotateY(Math.PI / 4);
+      geo.scale((L + 0.4) / Math.max(L, W) * 1.15, 1, (W + 0.4) / Math.max(L, W) * 1.15);
+      const roof = new THREE.Mesh(geo, roofMat);
+      roof.position.y = roofBaseY + params.roofHeight / 2;
+      roof.castShadow = true; roof.receiveShadow = true;
+      buildingGroup.add(roof);
+    }
+  }
+
+  controls.target.set(0, totalWallHeight / 2, 0);
+  infoEl.textContent =
+    `L ${L} m × B ${W} m | ${floors} Geschoss(e) × ${floorH} m = ${totalWallHeight.toFixed(1)} m Wandhöhe | Dach: ${params.roofType}`;
+}
+
+function rebuild() {
+  buildBuilding(getParams());
+}
+
+document.getElementById('rebuildBtn').addEventListener('click', rebuild);
+document.getElementById('resetViewBtn').addEventListener('click', () => {
+  camera.position.set(30, 25, 35);
+  controls.target.set(0, 3, 0);
+});
+
+// Live update on any input change for convenience
+document.getElementById('panel').addEventListener('change', rebuild);
+document.getElementById('panel').addEventListener('input', (e) => {
+  if (e.target.type === 'color') rebuild();
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = viewerEl.clientWidth / viewerEl.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+rebuild();
+animate();
+</script>
+</body>
+</html>
