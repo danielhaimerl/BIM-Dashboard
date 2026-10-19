@@ -153,6 +153,8 @@ Stufe	Inhalt	Geometrie	Menge
 Mengenberechnung (quantity_calculator.rb)
 Reihenfolge der Ermittlung:
 `einheit`-Tag bestimmt Methode (m³ → Volumen, m² → Fläche, m → Länge)
+Stück → immer 1 pro Bauteil
+m → längste skalierte Ausdehnung (Bounding Box), nicht Summe aller Kanten
 Transformation (sx, sy, sz) aus `group.transformation` extrahieren
 Solid? → Divergenz-Theorem mit transformierten Vertices
 Faces? → `face.area * sx * sy` (für horizontale Flächen)

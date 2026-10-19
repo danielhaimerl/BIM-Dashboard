@@ -20,10 +20,8 @@ module BimDashboard
     # -------------------------------------------------------------------------
     def self.calculate(entity)
       case entity
-      when Sketchup::Group
+      when Sketchup::Group, Sketchup::ComponentInstance
         calculate_group(entity, entity.transformation)
-      when Sketchup::ComponentInstance
-        calculate_group_entities(entity.definition.entities, entity.transformation)
       when Sketchup::Face
         { value: to_m2(entity.area), unit: 'm²', method: 'area', reliable: true }
       when Sketchup::Edge
@@ -72,7 +70,8 @@ module BimDashboard
     # -------------------------------------------------------------------------
     def self.calculate_group(group, transform)
       tag_einheit = group.get_attribute(DICT_NAME, 'einheit').to_s.strip
-      calculate_group_entities(group.entities, transform, tag_einheit)
+      entities = group.is_a?(Sketchup::Group) ? group.entities : group.definition.entities
+      calculate_group_entities(entities, transform, tag_einheit)
     end
 
     def self.calculate_group_entities(entities, transform, hint_einheit = '')
@@ -83,6 +82,17 @@ module BimDashboard
 
       faces = entities.grep(Sketchup::Face)
       edges = entities.grep(Sketchup::Edge)
+
+      # --- Stück: immer 1 pro Bauteil ---
+      if hint_einheit =~ /\ASt/i
+        return { value: 1.0, unit: hint_einheit, method: 'count', reliable: true }
+      end
+
+      # --- m Länge: längste Ausdehnung (Endmarkierungen etc. zählen nicht mit) ---
+      if hint_einheit == 'm'
+        length = extents_of(entities, sx, sy, sz).max
+        return { value: to_m(length), unit: 'm', method: 'extent', reliable: true } if length > 0
+      end
 
       # --- m³ Volumen ---
       if hint_einheit == 'm³' || hint_einheit == 'm3' || hint_einheit == ''
@@ -177,15 +187,20 @@ module BimDashboard
     # Bounding Box Volumen (skaliert)
     # -------------------------------------------------------------------------
     def self.bounding_box_of(entities, sx, sy, sz)
-      faces = entities.grep(Sketchup::Face)
-      return 0 if faces.empty?
-      all_pts = faces.flat_map { |f| f.vertices.map(&:position) }
-      min_x = all_pts.map(&:x).min; max_x = all_pts.map(&:x).max
-      min_y = all_pts.map(&:y).min; max_y = all_pts.map(&:y).max
-      min_z = all_pts.map(&:z).min; max_z = all_pts.map(&:z).max
-      (max_x - min_x) * sx * (max_y - min_y) * sy * (max_z - min_z) * sz
+      extents_of(entities, sx, sy, sz).reduce(:*)
+    end
+
+    # Skalierte Ausdehnung [dx, dy, dz] über alle Kanten-Endpunkte
+    def self.extents_of(entities, sx, sy, sz)
+      pts = entities.grep(Sketchup::Edge).flat_map { |e| e.vertices.map(&:position) }
+      return [0, 0, 0] if pts.empty?
+      [
+        (pts.map(&:x).max - pts.map(&:x).min) * sx,
+        (pts.map(&:y).max - pts.map(&:y).min) * sy,
+        (pts.map(&:z).max - pts.map(&:z).min) * sz,
+      ]
     rescue
-      0
+      [0, 0, 0]
     end
 
     # -------------------------------------------------------------------------
