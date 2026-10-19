@@ -84,6 +84,8 @@ module BimDashboard
     private
 
     # Traversiert rekursiv und akkumuliert die Welt-Transformation über alle Eltern.
+    # Bauteile: Gruppen ohne Unterelemente (Gruppen mit Unterelementen nur als Ordner)
+    # und jede Komponenten-Instanz als Ganzes (ihr Inhalt wird nicht einzeln gelistet).
     # Jedes Ergebnis-Tupel: [entity, path, world_transform]
     # Die world_transform wird in der Mengenberechnung verwendet, damit Skalierungen
     # übergeordneter Container-Gruppen korrekt berücksichtigt werden.
@@ -93,11 +95,10 @@ module BimDashboard
         when Sketchup::Group
           local_to_world = world_transform * e.transformation
           has_sub_groups = e.entities.any? { |c| c.is_a?(Sketchup::Group) || c.is_a?(Sketchup::ComponentInstance) }
-          results << [e, path.dup, local_to_world] if depth > 0 && !has_sub_groups
+          results << [e, path.dup, local_to_world] unless has_sub_groups
           traverse_entities(e.entities, results, path + [entity_name(e)], depth + 1, local_to_world)
         when Sketchup::ComponentInstance
-          local_to_world = world_transform * e.transformation
-          traverse_entities(e.definition.entities, results, path + [entity_name(e)], depth + 1, local_to_world)
+          results << [e, path.dup, world_transform * e.transformation]
         when Sketchup::Face, Sketchup::Edge
           tags = get_tags(e)
           results << [e, path.dup, world_transform] unless tags.empty?
