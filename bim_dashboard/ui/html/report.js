@@ -16,6 +16,9 @@ function resolveLabel(catKey, rawVal) {
     // Alte Daten: nur Nummer gespeichert → Präfix-Suche
     const byPrefix = (lib.kostengruppen || []).find(k => k.kg.startsWith(rawVal + ' ') || k.kg.startsWith(rawVal + '-'));
     if (byPrefix) return byPrefix.kg;
+    // Nicht in der Bibliothek → Bezeichnung aus einem Bauteil-Tag mit derselben Nummer
+    const tagged = (State.entities || []).map(e => e.tags && e.tags.din276).find(t => t && t.startsWith(rawVal + ' '));
+    if (tagged) return tagged;
   }
   return rawVal;
 }

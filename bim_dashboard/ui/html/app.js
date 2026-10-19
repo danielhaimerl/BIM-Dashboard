@@ -339,8 +339,11 @@ function groupLabel(key) {
 }
 
 function groupValue(e, key) {
-  if (DIN276_LEVELS[key]) {
-    const m = ((e.tags && e.tags.din276) || '').match(/^\s*(\d{3})/);
+  if (key === 'din276' || DIN276_LEVELS[key]) {
+    const raw = (e.tags && e.tags.din276) || '';
+    const m = raw.match(/^\s*(\d{3})/);
+    // 3. Ebene: nur nach Nummer gruppieren ("331" und "331 Tragende …" = eine Gruppe)
+    if (key === 'din276') return m ? m[1] : (raw || '—');
     if (!m) return '—';
     return key === 'din276_1' ? m[1][0] + '00' : m[1].slice(0, 2) + '0';
   }
