@@ -180,6 +180,7 @@ function buildSection(node, groupKeys, depth, parentTotal) {
       <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
+      <span class="cost-section-menge">${fmtGroupMenge(items)}</span>
       <span class="pct-bar-wrap header-pct"><span class="pct-bar" style="width:${anteil * 0.6}%"></span><span>${anteil} %</span></span>
       <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
       <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
@@ -689,6 +690,27 @@ function getCostData(entity) {
     ep,
     gb,
   };
+}
+
+// Mengensumme einer Gruppe – nur wenn alle Bauteile eine Menge in derselben Einheit haben
+function fmtGroupMenge(items) {
+  let sum = 0, unit = null;
+  for (const e of items) {
+    const cost = getCostData(e);
+    let menge, einheit;
+    if (cost && cost.menge != null) {
+      menge = cost.menge; einheit = cost.einheit;
+    } else {
+      const autoStr = (e.menge_auto || '').trim();
+      menge   = parseMengeAuto(autoStr);
+      einheit = autoStr.replace(/^[\d.,\s]+/, '').trim();
+    }
+    if (!(menge > 0) || !einheit || einheit === '?') return '';
+    if (unit === null) unit = einheit;
+    if (einheit !== unit) return '';
+    sum += menge;
+  }
+  return unit ? `${fmtNum(sum)} ${escHtml(unit)}` : '';
 }
 
 function parseMengeAuto(str) {
