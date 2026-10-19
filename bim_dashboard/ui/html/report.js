@@ -4,6 +4,22 @@
 
 'use strict';
 
+// Tag-Wert zur Anzeige auflösen
+// din276: voller Text direkt im Tag ("330 Außenwände") → kein Lookup nötig
+// Fallback: für alte Daten die nur die Nummer haben, Bibliothek durchsuchen
+function resolveLabel(catKey, rawVal) {
+  if (!rawVal || rawVal === '—') return rawVal;
+  if (catKey === 'din276') {
+    const lib = State.library || {};
+    const kg = (lib.kostengruppen || []).find(k => k.kg === rawVal);
+    if (kg) return kg.kg; // enthält bereits den vollen Text
+    // Alte Daten: nur Nummer gespeichert → Präfix-Suche
+    const byPrefix = (lib.kostengruppen || []).find(k => k.kg.startsWith(rawVal + ' ') || k.kg.startsWith(rawVal + '-'));
+    if (byPrefix) return byPrefix.kg;
+  }
+  return rawVal;
+}
+
 // ---------------------------------------------------------------------------
 // Haupt-Render-Funktion
 // ---------------------------------------------------------------------------
@@ -92,6 +108,7 @@ function buildSection(node, groupKeys, depth) {
     const items    = collectItems(children);
     const count    = items.length;
     const subtotal = sumCosts(items);
+    const displayLabel = resolveLabel(catKey, label);
 
     const section = document.createElement('div');
     section.className = `report-section depth-${depth}`;
@@ -101,7 +118,7 @@ function buildSection(node, groupKeys, depth) {
     hdr.innerHTML = `
       <span class="report-toggle">▾</span>
       <span class="report-cat-label">${escHtml(catLabel)}:</span>
-      <span class="report-group-label">${escHtml(label)}</span>
+      <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
       <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
@@ -152,23 +169,32 @@ function buildSummaryTable(node, nextCatKey, parentTotal) {
   wrap.className = 'report-summary';
   const tbl = document.createElement('table');
   tbl.className = 'report-summary-table';
-  tbl.innerHTML = `<thead><tr>
-    <th>${escHtml(catLabel)}</th>
-    <th class="num">Anzahl</th>
-    <th class="num">Anteil</th>
-    <th class="num">Gesamtbetrag</th>
-  </tr></thead>`;
+  tbl.innerHTML = `
+    <colgroup>
+      <col style="width:auto">
+      <col style="width:60px">
+      <col style="width:120px">
+      <col style="width:130px">
+    </colgroup>
+    <thead><tr>
+      <th>${escHtml(catLabel)}</th>
+      <th class="num">Anzahl</th>
+      <th class="num">Anteil</th>
+      <th class="num">Gesamtbetrag</th>
+    </tr></thead>`;
   const tbody    = document.createElement('tbody');
-  const allItems = collectItems(node);
+  const allItems    = collectItems(node);
+  const totalCosts  = sumCosts(allItems);
   Object.entries(node).forEach(([subLabel, subChildren]) => {
     const items  = collectItems(subChildren);
     const n      = items.length;
     const cost   = sumCosts(items);
-    const anteil = allItems.length > 0 ? Math.round(n / allItems.length * 100) : 0;
+    const anteil = totalCosts > 0 ? Math.round(cost / totalCosts * 100) : 0;
+    const displaySub = resolveLabel(nextCatKey, subLabel);
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
     tr.innerHTML = `
-      <td>${escHtml(subLabel)}</td>
+      <td>${escHtml(displaySub)}</td>
       <td class="num">${n}</td>
       <td class="num">
         <div class="pct-bar-wrap">
@@ -193,127 +219,283 @@ function buildSummaryTable(node, nextCatKey, parentTotal) {
 }
 
 // ---------------------------------------------------------------------------
-// Detail-Tabelle
+// Detail-Tabelle (mit Namens-Gruppierung)
 // ---------------------------------------------------------------------------
 function buildDetailTable(items) {
   const wrap = document.createElement('div');
   wrap.className = 'report-agg-wrapper';
   const tbl = document.createElement('table');
   tbl.className = 'report-table';
+  tbl.innerHTML = `<colgroup>
+    <col style="width:30%">
+    <col style="width:16%">
+    <col style="width:14%">
+    <col style="width:13%">
+    <col style="width:12%">
+    <col style="width:13%">
+    <col style="width:24px">
+  </colgroup>`;
 
-  // Header mit data-col zur Validierung
   const thead = tbl.createTHead();
   const hRow  = thead.insertRow();
-  ['Name','Stufe','Material','Menge','EP (€)','GB (€)',''].forEach((label, i) => {
+  ['Name', 'Stufe', 'Material', 'Menge', 'EP (€)', 'GB (€)', ''].forEach((label, i) => {
     const th = document.createElement('th');
     th.textContent = label;
     th.dataset.col = i;
     if (i >= 3 && i <= 5) th.className = 'num';
-    if (i === 6) th.style.width = '24px';
     hRow.appendChild(th);
   });
 
-  const tbody    = document.createElement('tbody');
-  let   subtotal = 0;
-  const stufeLabels = { '1': 'Stufe 1', '2': 'Stufe 2', '3': 'Stufe 3' };
+  const tbody       = document.createElement('tbody');
+  let   subtotal    = 0;
+  const stufeLabels = {
+    '1': '01 - Kostenprognose', '2': '02 - Kostenschätzung', '3': '03 - Kostenberechnung',
+    '01 - Kostenprognose':  '01 - Kostenprognose',
+    '02 - Kostenschätzung': '02 - Kostenschätzung',
+    '03 - Kostenberechnung':'03 - Kostenberechnung',
+  };
 
-  // DEBUG: erste Entity loggen
-  if (items.length > 0) {
-    const dbg = getCostData(items[0]);
-    console.log('[BIM Report] Erste Entity:', items[0].name, '| menge_auto:', items[0].menge_auto, '| tags:', JSON.stringify(items[0].tags), '| getCostData:', JSON.stringify(dbg));
-  }
-
+  // Bauteile nach Name gruppieren (Reihenfolge erhalten)
+  const nameGroups = new Map();
   items.forEach(e => {
-    const cost = getCostData(e);
-    const tr   = document.createElement('tr');
-    tr.className = State.selectedIds.has(String(e.id)) ? 'selected' : '';
+    const key = e.name || '—';
+    if (!nameGroups.has(key)) nameGroups.set(key, []);
+    nameGroups.get(key).push(e);
+  });
 
-    const stufe = e.tags?.stufe || '';
+  nameGroups.forEach((groupItems, name) => {
+    const isGroup = groupItems.length > 1;
 
-    // Spalte 1: Name
+    // Aggregierte Kosten/Mengen berechnen
+    let totalGB    = 0;
+    let totalMenge = 0;
+    let einheit    = '';
+    let ep         = null;
+    let mengeOk    = true;
+
+    // Mengen unabhängig von Preis direkt aus menge_auto aufsummieren
+    let totalMengeAuto = 0;
+    let einheitAuto    = '';
+    let mengeAutoOk    = true;
+
+    groupItems.forEach(e => {
+      // Kosten
+      const cost = getCostData(e);
+      if (cost) {
+        totalGB += cost.gb || 0;
+        if (ep === null) ep = cost.ep;
+        if (!einheit) einheit = cost.einheit;
+        if (cost.menge != null && cost.einheit === einheit) {
+          totalMenge += cost.menge;
+        } else {
+          mengeOk = false;
+        }
+      } else {
+        mengeOk = false;
+      }
+
+      // Menge aus menge_auto (kein Preis erforderlich)
+      const autoStr = (e.menge_auto || '').trim();
+      const autoVal = parseMengeAuto(autoStr);
+      const autoUnit = autoStr.replace(/^[\d.,\s]+/, '').trim();
+      if (autoVal && autoVal > 0) {
+        if (!einheitAuto) einheitAuto = autoUnit;
+        if (autoUnit === einheitAuto) {
+          totalMengeAuto += autoVal;
+        } else {
+          mengeAutoOk = false;
+        }
+      } else {
+        mengeAutoOk = false;
+      }
+    });
+    subtotal += totalGB;
+
+    // ── Aggregat-Zeile ──────────────────────────────────────────────────────
+    const tr = document.createElement('tr');
+    tr.className = 'report-group-row';
+
+    // Name + Expand-Button
     const tdName = document.createElement('td');
     tdName.className = 'report-item-name';
-    tdName.textContent = e.name;
-
-    // Spalte 2: Stufe
-    const tdStufe = document.createElement('td');
-    if (stufe) {
+    if (isGroup) {
+      const expandBtn = document.createElement('button');
+      expandBtn.className   = 'btn-expand-group';
+      expandBtn.textContent = '+';
+      expandBtn.title       = `${groupItems.length} Elemente aufklappen`;
+      tdName.appendChild(expandBtn);
+    }
+    const nameTxt = document.createElement('span');
+    nameTxt.textContent = name;
+    tdName.appendChild(nameTxt);
+    if (isGroup) {
       const badge = document.createElement('span');
-      badge.className = `stufe-badge stufe-${stufe}`;
-      badge.textContent = stufeLabels[stufe] || stufe;
-      tdStufe.appendChild(badge);
+      badge.className   = 'badge badge-count';
+      badge.textContent = groupItems.length;
+      tdName.appendChild(badge);
+    }
+
+    // Stufe (wenn alle gleich → anzeigen)
+    const tdStufe = document.createElement('td');
+    const stufen  = [...new Set(groupItems.map(e => e.tags?.stufe || ''))];
+    if (stufen.length === 1 && stufen[0]) {
+      const b = document.createElement('span');
+      b.className   = `stufe-badge stufe-${stufen[0]}`;
+      b.textContent = stufeLabels[stufen[0]] || stufen[0];
+      tdStufe.appendChild(b);
     } else {
       tdStufe.innerHTML = '<span class="dim">—</span>';
     }
 
-    // Spalte 3: Material
-    const tdMat = document.createElement('td');
+    // Material
+    const tdMat  = document.createElement('td');
     tdMat.className = 'dim';
-    tdMat.textContent = e.tags?.material || '—';
+    const mats   = [...new Set(groupItems.map(e => e.tags?.material || '').filter(Boolean))];
+    tdMat.textContent = mats.length === 1 ? mats[0] : (mats.length > 1 ? '(gem.)' : '—');
 
-    // Spalte 4: Menge (mit Einheit)
+    // Menge
     const tdMenge = document.createElement('td');
     tdMenge.className = 'num';
-    if (cost && cost.menge != null) {
-      tdMenge.innerHTML = `${fmtNum(cost.menge)}<span class="menge-einheit"> ${escHtml(cost.einheit)}</span>`;
-    } else if (e.menge_auto) {
-      tdMenge.innerHTML = `<span class="dim">${escHtml(e.menge_auto)}</span>`;
+    if (mengeOk && totalMenge > 0 && einheit) {
+      // Aus Kostendaten (Preis vorhanden)
+      tdMenge.innerHTML = `${fmtNum(totalMenge)}<span class="menge-einheit"> ${escHtml(einheit)}</span>`;
+    } else if (mengeAutoOk && totalMengeAuto > 0 && einheitAuto) {
+      // Aus menge_auto (funktioniert auch ohne Preis)
+      tdMenge.innerHTML = `${fmtNum(totalMengeAuto)}<span class="menge-einheit"> ${escHtml(einheitAuto)}</span>`;
+    } else if (!isGroup && groupItems[0]?.menge_auto) {
+      tdMenge.innerHTML = `<span class="dim">${escHtml(fmtMenge(groupItems[0].menge_auto))}</span>`;
     } else {
       tdMenge.innerHTML = '<span class="dim">—</span>';
     }
 
-    // Spalte 5: EP
+    // EP
     const tdEP = document.createElement('td');
     tdEP.className = 'num';
-    if (cost) {
-      tdEP.innerHTML = `${fmtNum(cost.ep)}<span class="menge-einheit"> €/${escHtml(cost.einheit)}</span>`;
+    if (ep != null && ep > 0) {
+      tdEP.innerHTML = `${fmtNum(ep)}<span class="menge-einheit"> €/${escHtml(einheit || '?')}</span>`;
     } else {
       tdEP.innerHTML = '<span class="dim">—</span>';
     }
 
-    // Spalte 6: GB
+    // GB
     const tdGB = document.createElement('td');
     tdGB.className = 'num cost-cell';
-    if (cost && cost.gb != null) {
-      tdGB.innerHTML = `<strong>${fmtEur(cost.gb)}</strong>`;
-      subtotal += cost.gb;
-    } else if (cost) {
-      tdGB.innerHTML = '<span class="dim">⊞ Mengen berechnen</span>';
-    } else {
-      tdGB.innerHTML = '<span class="dim">—</span>';
-    }
+    tdGB.innerHTML = totalGB > 0
+      ? `<strong>${fmtEur(totalGB)}</strong>`
+      : '<span class="dim">—</span>';
 
-    // Spalte 7: Zoom-Button
-    const tdZoom = document.createElement('td');
+    // Zoom
+    const tdZoom  = document.createElement('td');
     const zoomBtn = document.createElement('button');
-    zoomBtn.className = 'btn-zoom-item';
-    zoomBtn.title     = 'Selektieren';
+    zoomBtn.className   = 'btn-zoom-item';
+    zoomBtn.title       = 'Selektieren';
     zoomBtn.textContent = '⌖';
     tdZoom.appendChild(zoomBtn);
 
-    tr.appendChild(tdName);
-    tr.appendChild(tdStufe);
-    tr.appendChild(tdMat);
-    tr.appendChild(tdMenge);
-    tr.appendChild(tdEP);
-    tr.appendChild(tdGB);
-    tr.appendChild(tdZoom);
+    tr.append(tdName, tdStufe, tdMat, tdMenge, tdEP, tdGB, tdZoom);
 
     tr.addEventListener('click', (ev) => {
-      if (ev.target === zoomBtn) return;
-      State.selectedIds = new Set([String(e.id)]);
+      if (ev.target.closest('.btn-expand-group') || ev.target === zoomBtn) return;
+      State.selectedIds = new Set(groupItems.map(e => String(e.id)));
       syncSelectionToSketchUp();
       updateSelectionBar();
       renderEntityList();
       renderTagEditor();
-      scrollToEntity(String(e.id));
+      if (groupItems.length === 1) scrollToEntity(String(groupItems[0].id));
     });
     zoomBtn.addEventListener('click', () => {
-      State.selectedIds = new Set([String(e.id)]);
+      State.selectedIds = new Set(groupItems.map(e => String(e.id)));
       syncSelectionToSketchUp();
       ruby('zoomToSelection');
     });
+
     tbody.appendChild(tr);
+
+    // ── Detail-Zeilen (nur bei Gruppe, initial versteckt) ───────────────────
+    if (isGroup) {
+      const detailRows = groupItems.map(e => {
+        const cost = getCostData(e);
+        const dtr  = document.createElement('tr');
+        dtr.className    = 'report-detail-row';
+        dtr.style.display = 'none';
+
+        const stufe = e.tags?.stufe || '';
+
+        const dtdName = document.createElement('td');
+        dtdName.className   = 'report-item-name report-detail-indent';
+        dtdName.textContent = e.name;
+
+        const dtdStufe = document.createElement('td');
+        if (stufe) {
+          const b = document.createElement('span');
+          b.className   = `stufe-badge stufe-${stufe}`;
+          b.textContent = stufeLabels[stufe] || stufe;
+          dtdStufe.appendChild(b);
+        } else {
+          dtdStufe.innerHTML = '<span class="dim">—</span>';
+        }
+
+        const dtdMat = document.createElement('td');
+        dtdMat.className   = 'dim';
+        dtdMat.textContent = e.tags?.material || '—';
+
+        const dtdMenge = document.createElement('td');
+        dtdMenge.className = 'num';
+        if (cost?.menge != null) {
+          dtdMenge.innerHTML = `${fmtNum(cost.menge)}<span class="menge-einheit"> ${escHtml(cost.einheit)}</span>`;
+        } else if (e.menge_auto) {
+          dtdMenge.innerHTML = `<span class="dim">${escHtml(fmtMenge(e.menge_auto))}</span>`;
+        } else {
+          dtdMenge.innerHTML = '<span class="dim">—</span>';
+        }
+
+        const dtdEP = document.createElement('td');
+        dtdEP.className = 'num';
+        dtdEP.innerHTML = (cost?.ep > 0)
+          ? `${fmtNum(cost.ep)}<span class="menge-einheit"> €/${escHtml(cost.einheit)}</span>`
+          : '<span class="dim">—</span>';
+
+        const dtdGB = document.createElement('td');
+        dtdGB.className = 'num cost-cell';
+        dtdGB.innerHTML = (cost?.gb > 0) ? fmtEur(cost.gb) : '<span class="dim">—</span>';
+
+        const dtdZoom  = document.createElement('td');
+        const dzoomBtn = document.createElement('button');
+        dzoomBtn.className   = 'btn-zoom-item';
+        dzoomBtn.title       = 'Selektieren';
+        dzoomBtn.textContent = '⌖';
+        dtdZoom.appendChild(dzoomBtn);
+
+        dtr.append(dtdName, dtdStufe, dtdMat, dtdMenge, dtdEP, dtdGB, dtdZoom);
+
+        dtr.addEventListener('click', (ev) => {
+          if (ev.target === dzoomBtn) return;
+          State.selectedIds = new Set([String(e.id)]);
+          syncSelectionToSketchUp();
+          updateSelectionBar();
+          renderEntityList();
+          renderTagEditor();
+          scrollToEntity(String(e.id));
+        });
+        dzoomBtn.addEventListener('click', () => {
+          State.selectedIds = new Set([String(e.id)]);
+          syncSelectionToSketchUp();
+          ruby('zoomToSelection');
+        });
+
+        tbody.appendChild(dtr);
+        return dtr;
+      });
+
+      // Expand-Button verdrahten
+      tr.querySelector('.btn-expand-group').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const open = detailRows[0].style.display !== 'none';
+        detailRows.forEach(dr => dr.style.display = open ? 'none' : '');
+        ev.currentTarget.textContent = open ? '+' : '−';
+        ev.currentTarget.classList.toggle('expanded', !open);
+      });
+    }
   });
 
   // Summenzeile
@@ -534,8 +716,206 @@ function fmtEur(v) {
 
 function fmtNum(v) {
   return typeof v === 'number'
-    ? v.toLocaleString('de-DE', { maximumFractionDigits: 3 })
+    ? v.toLocaleString('de-DE', { maximumFractionDigits: 2 })
     : String(v || '—');
+}
+
+// ---------------------------------------------------------------------------
+// Excel-Export
+// ---------------------------------------------------------------------------
+
+// Wird von rubyBridge.onReportExported aufgerufen
+if (!window.rubyBridge) window.rubyBridge = {};
+window.rubyBridge.onReportExported = function({ success, path }) {
+  if (success) showToast('✓ Excel gespeichert: ' + path);
+};
+
+function exportReportExcel() {
+  const activeGroups = (State.groupBy || []).filter(Boolean);
+  const entities     = getReportFilteredEntities();
+  if (!entities.length) { showToast('Keine Daten zum Export'); return; }
+
+  const rows    = [];
+  const total   = sumCosts(entities);
+  const project = document.getElementById('projectName')?.textContent || '';
+  const date    = new Date().toLocaleDateString('de-DE');
+
+  rows.push({ type: 'total', depth: 0, label: `Gesamt (${entities.length} Bauteile)`, cost: total });
+
+  if (activeGroups.length) {
+    const grouped = groupEntities(entities, activeGroups);
+    collectExportSections(grouped, activeGroups, 0, rows);
+  } else {
+    collectExportDetails(entities, 0, rows);
+  }
+
+  ruby('exportExcelFile', { rows, project, date, filename: 'BIM_Auswertung.xlsx' });
+}
+
+function exportReportCSVStructured() {
+  const activeGroups = (State.groupBy || []).filter(Boolean);
+  const entities     = getReportFilteredEntities();
+  if (!entities.length) { showToast('Keine Daten zum Export'); return; }
+
+  const rows = [];
+  const totalCost = sumCosts(entities);
+  const project   = document.getElementById('projectName')?.textContent || '';
+  const date      = new Date().toLocaleDateString('de-DE');
+
+  rows.push({ type: 'total', depth: 0, label: `Gesamt (${entities.length} Bauteile)`, cost: totalCost });
+
+  if (activeGroups.length) {
+    const grouped = groupEntities(entities, activeGroups);
+    collectExportSections(grouped, activeGroups, 0, rows);
+  } else {
+    collectExportDetails(entities, 0, rows);
+  }
+
+  // CSV aufbauen (Semikolon-getrennt für Excel DE)
+  const lines = [];
+  lines.push(`BIM Auswertung;${project};Erstellt: ${date}`);
+  lines.push('');
+  lines.push('Bezeichnung;Kostenstufe;Material;Menge;Einheit;EP (€);GB (€)');
+
+  rows.forEach(r => {
+    const indent = '  '.repeat(r.depth || 0);
+    const fmtN = v => v != null ? String(v).replace('.', ',') : '';
+    switch (r.type) {
+      case 'total':
+        lines.push(`${r.label};;;;;;${fmtN(r.cost > 0 ? r.cost.toFixed(2) : '')}`);
+        break;
+      case 'section':
+        lines.push(`${indent}${r.label} (${r.count} Bauteile);;;;;;${fmtN(r.cost > 0 ? r.cost.toFixed(2) : '')}`);
+        break;
+      case 'group': {
+        const suffix = r.count > 1 ? ` (${r.count}×)` : '';
+        const menge  = r.menge != null ? fmtN(parseFloat(r.menge).toFixed(3)) : '';
+        lines.push([
+          `${indent}${r.name}${suffix}`,
+          r.stufe || '',
+          r.material || '',
+          menge,
+          r.einheit || '',
+          r.ep  ? fmtN(parseFloat(r.ep).toFixed(2))  : '',
+          r.gb  ? fmtN(parseFloat(r.gb).toFixed(2))  : '',
+        ].join(';'));
+        break;
+      }
+      case 'detail': {
+        const menge = r.menge != null ? fmtN(parseFloat(r.menge).toFixed(3)) : '';
+        lines.push([
+          `${indent}${r.name}`,
+          r.stufe || '',
+          r.material || '',
+          menge,
+          r.einheit || '',
+          r.ep ? fmtN(parseFloat(r.ep).toFixed(2)) : '',
+          r.gb ? fmtN(parseFloat(r.gb).toFixed(2)) : '',
+        ].join(';'));
+        break;
+      }
+      case 'subtotal':
+        lines.push(`${indent}${r.label};;;;;;${fmtN(r.cost > 0 ? r.cost.toFixed(2) : '')}`);
+        break;
+    }
+  });
+
+  ruby('exportCSVFile', { csv: lines.join('\r\n'), filename: 'BIM_Auswertung.csv' });
+}
+
+function collectExportSections(node, groupKeys, depth, rows) {
+  if (node.__items__) {
+    collectExportDetails(node.__items__, depth, rows);
+    return;
+  }
+  const catKey   = groupKeys[depth];
+  const catLabel = (State.categories && State.categories[catKey]) || catKey;
+
+  Object.entries(node).forEach(([label, children]) => {
+    const items        = collectItems(children);
+    const cost         = sumCosts(items);
+    const displayLabel = resolveLabel(catKey, label);
+    rows.push({ type: 'section', depth, label: `${catLabel}: ${displayLabel}`, count: items.length, cost });
+    collectExportSections(children, groupKeys, depth + 1, rows);
+  });
+}
+
+function collectExportDetails(items, depth, rows) {
+  // Gleiche Namensgruppierung wie in buildDetailTable
+  const nameGroups = new Map();
+  items.forEach(e => {
+    const key = e.name || '—';
+    if (!nameGroups.has(key)) nameGroups.set(key, []);
+    nameGroups.get(key).push(e);
+  });
+
+  let subtotal = 0;
+
+  nameGroups.forEach((groupItems, name) => {
+    let totalGB = 0, totalMenge = 0, einheit = '', ep = null;
+    let totalMengeAuto = 0, einheitAuto = '', mengeAutoOk = true;
+
+    groupItems.forEach(e => {
+      const cost = getCostData(e);
+      if (cost) {
+        totalGB += cost.gb || 0;
+        if (ep === null) ep = cost.ep;
+        if (!einheit) einheit = cost.einheit;
+        if (cost.menge != null) totalMenge += cost.menge;
+      }
+      const autoStr  = (e.menge_auto || '').trim();
+      const autoVal  = parseMengeAuto(autoStr);
+      const autoUnit = autoStr.replace(/^[\d.,\s]+/, '').trim();
+      if (autoVal && autoVal > 0) {
+        if (!einheitAuto) einheitAuto = autoUnit;
+        if (autoUnit === einheitAuto) totalMengeAuto += autoVal;
+        else mengeAutoOk = false;
+      } else { mengeAutoOk = false; }
+    });
+    subtotal += totalGB;
+
+    const mengeVal  = totalMenge  > 0 ? totalMenge  : (mengeAutoOk && totalMengeAuto > 0 ? totalMengeAuto : null);
+    const einheitVal = totalMenge > 0 ? einheit      : einheitAuto;
+    const stufen    = [...new Set(groupItems.map(e => e.tags?.stufe || '').filter(Boolean))];
+    const mats      = [...new Set(groupItems.map(e => e.tags?.material || '').filter(Boolean))];
+
+    rows.push({
+      type:     'group',
+      depth,
+      name,
+      count:    groupItems.length,
+      stufe:    stufen.length === 1 ? stufen[0] : (stufen.length > 1 ? '(gem.)' : ''),
+      material: mats.length   === 1 ? mats[0]   : (mats.length   > 1 ? '(gem.)' : ''),
+      menge:    mengeVal,
+      einheit:  einheitVal || '',
+      ep:       ep || null,
+      gb:       totalGB || null,
+    });
+
+    if (groupItems.length > 1) {
+      groupItems.forEach(e => {
+        const cost    = getCostData(e);
+        const autoStr = (e.menge_auto || '').trim();
+        const autoVal = parseMengeAuto(autoStr);
+        const autoUnit = autoStr.replace(/^[\d.,\s]+/, '').trim();
+        rows.push({
+          type:     'detail',
+          depth:    depth + 1,
+          name:     e.name || '—',
+          stufe:    e.tags?.stufe    || '',
+          material: e.tags?.material || '',
+          menge:    cost?.menge || (autoVal > 0 ? autoVal : null),
+          einheit:  cost?.einheit || autoUnit || '',
+          ep:       cost?.ep  || null,
+          gb:       cost?.gb  || null,
+        });
+      });
+    }
+  });
+
+  if (subtotal > 0) {
+    rows.push({ type: 'subtotal', depth, label: `Summe (${items.length} Bauteil${items.length !== 1 ? 'e' : ''})`, cost: subtotal });
+  }
 }
 
 // Konsolen-Debug-Hilfe

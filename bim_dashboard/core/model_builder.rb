@@ -31,7 +31,10 @@ module BimDashboard
     def self.import_from_excel(path)
       structure, tag_lists = parse_excel(path)
       if structure.empty?
-        return { error: 'Keine Daten gefunden. Bitte prüfen ob die Datei einen Reiter "Modellstruktur" enthält.' }
+        py_error = tag_lists.is_a?(Hash) ? tag_lists['__error'] : nil
+        msg = py_error ? "Import fehlgeschlagen: #{py_error}" \
+                       : 'Keine Daten gefunden. Bitte prüfen ob die Datei einen Reiter "Modellstruktur" enthält.'
+        return { error: msg }
       end
 
       model = Sketchup.active_model
@@ -49,86 +52,149 @@ module BimDashboard
     end
 
     # -------------------------------------------------------------------------
-    # Excel parsen via Python
+    # Excel parsen via PowerShell (kein Python erforderlich)
     # -------------------------------------------------------------------------
     def self.parse_excel(path)
-      py_code = <<~PYTHON
-        import json, sys, warnings
-        warnings.filterwarnings("ignore")
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(sys.argv[1], read_only=True, data_only=True)
+      ps_code = <<~'PS'
+        param([string]$XlsxPath, [string]$OutPath)
+        function Write-Result($data) {
+          $json = $data | ConvertTo-Json -Depth 10 -Compress
+          [System.IO.File]::WriteAllText($OutPath, $json, [System.Text.UTF8Encoding]::new($false))
+        }
+        try {
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          function Read-Zip($zip, $entry) {
+            $e = $zip.GetEntry($entry)
+            if (!$e) { return '' }
+            $r = [System.IO.StreamReader]::new($e.Open(), [System.Text.Encoding]::UTF8)
+            $c = $r.ReadToEnd(); $r.Dispose(); return $c
+          }
+          $stream = [System.IO.File]::Open($XlsxPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+          $zip = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Read)
 
-            if "Modellstruktur" not in wb.sheetnames:
-                print(json.dumps({"error": "Kein Reiter Modellstruktur"}))
-                sys.exit(0)
+          # Shared strings
+          $ss = [System.Collections.Generic.List[string]]::new()
+          $ssc = Read-Zip $zip 'xl/sharedStrings.xml'
+          if ($ssc) {
+            $ssXml = [xml]$ssc
+            $ns = @{x='http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            foreach ($si in (Select-Xml -Xml $ssXml -XPath '//x:si' -Namespace $ns)) {
+              $parts = Select-Xml -Xml $si.Node -XPath './/x:t' -Namespace $ns
+              $ss.Add(($parts | ForEach-Object { $_.Node.InnerText }) -join '')
+            }
+          }
 
-            ws = wb["Modellstruktur"]
-            rows = []
-            header_skipped = False
-            for row in ws.iter_rows(values_only=True):
-                if not any(c for c in row if c is not None and str(c).strip()):
-                    continue
-                if not header_skipped and row[0] == "E1":
-                    header_skipped = True
-                    continue
-                rows.append([
-                    str(row[0]).strip() if row[0] is not None else None,
-                    str(row[1]).strip() if row[1] is not None else None,
-                    str(row[2]).strip() if row[2] is not None else None,
-                    str(row[3]).strip() if row[3] is not None else None,
-                    str(row[4]).strip() if row[4] is not None else None,
-                    str(row[5]).strip() if row[5] is not None else None,
-                    str(row[6]).strip() if row[6] is not None else None,
-                ])
+          # Sheet map from workbook
+          $wbXml  = [xml](Read-Zip $zip 'xl/workbook.xml')
+          $relXml = [xml](Read-Zip $zip 'xl/_rels/workbook.xml.rels')
+          $sheetMap = @{}
+          $nsWb = @{x='http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+          foreach ($sn in (Select-Xml -Xml $wbXml -XPath '//x:sheet' -Namespace $nsWb)) {
+            $name = $sn.Node.GetAttribute('name')
+            $rid  = $sn.Node.GetAttribute('id','http://schemas.openxmlformats.org/officeDocument/2006/relationships')
+            $rel  = $relXml.Relationships.Relationship | Where-Object { $_.Id -eq $rid } | Select-Object -First 1
+            if ($rel) { $sheetMap[$name] = 'xl/' + $rel.Target }
+          }
 
-            tag_lists = {}
-            for sheet in ["Tag_Verortung","Tag_Gewerke","Tag_Kostengruppen","Tag_Materialien"]:
-                if sheet in wb.sheetnames:
-                    ws2 = wb[sheet]
-                    vals = []
-                    for r in ws2.iter_rows(values_only=True):
-                        if r[0] is not None and str(r[0]).strip():
-                            vals.append(str(r[0]).strip())
-                    tag_lists[sheet] = vals
+          function Get-CellVal($cell) {
+            $t = $cell.GetAttribute('t')
+            $v = $cell.SelectSingleNode('*[local-name()="v"]')
+            if (!$v) { return $null }
+            $val = $v.InnerText
+            if ($t -eq 's') { $idx=[int]$val; if($idx -lt $ss.Count){return $ss[$idx]}else{return ''} }
+            return $val
+          }
+          function Get-ColIdx($ref) {
+            $letters = $ref -replace '\d+',''
+            $idx = 0
+            foreach ($c in $letters.ToCharArray()) { $idx = $idx*26 + ([int][char]$c - [int][char]'A' + 1) }
+            return $idx - 1
+          }
 
-            print(json.dumps({"rows": rows, "tag_lists": tag_lists}))
+          function Parse-Sheet($path) {
+            $content = Read-Zip $zip $path
+            if (!$content) { return @() }
+            $xml = [xml]$content
+            $ns  = @{x='http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            $out = [System.Collections.Generic.List[object]]::new()
+            $headerSkipped = $false
+            foreach ($rn in (Select-Xml -Xml $xml -XPath '//x:row' -Namespace $ns)) {
+              $cells = @($null,$null,$null,$null,$null,$null,$null)
+              foreach ($cn in (Select-Xml -Xml $rn.Node -XPath 'x:c' -Namespace $ns)) {
+                $ci = Get-ColIdx ($cn.Node.GetAttribute('r'))
+                if ($ci -ge 0 -and $ci -le 6) { $cells[$ci] = Get-CellVal $cn.Node }
+              }
+              $hasData = $cells | Where-Object { $_ -ne $null -and "$_".Trim() -ne '' }
+              if (!$hasData) { continue }
+              if (!$headerSkipped -and $cells[0] -eq 'E1') { $headerSkipped=$true; continue }
+              $out.Add($cells)
+            }
+            return ,$out.ToArray()
+          }
 
-        except Exception as e:
-            import traceback
-            print(json.dumps({"error": str(e), "trace": traceback.format_exc()}))
-      PYTHON
+          # Find Modellstruktur (case-insensitive)
+          $msKey = $sheetMap.Keys | Where-Object { $_.Trim().ToLower() -eq 'modellstruktur' } | Select-Object -First 1
+          if (!$msKey) {
+            Write-Result @{error=('Kein Reiter Modellstruktur. Vorhandene Reiter: ' + ($sheetMap.Keys -join ', '))}
+            $zip.Dispose(); $stream.Dispose(); exit 0
+          }
+          $rows = Parse-Sheet $sheetMap[$msKey]
+
+          # Tag sheets
+          $tagLists = @{}
+          foreach ($ts in @('Tag_Kostenstufe','Tag_Gewerk','Tag_Verortung','Tag_Kostengruppe','Tag_Material')) {
+            $tsKey = $sheetMap.Keys | Where-Object { $_.Trim().ToLower() -eq $ts.ToLower() } | Select-Object -First 1
+            if ($tsKey) {
+              $content = Read-Zip $zip $sheetMap[$tsKey]
+              $xml = [xml]$content
+              $ns  = @{x='http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+              $vals = [System.Collections.Generic.List[string]]::new()
+              foreach ($rn in (Select-Xml -Xml $xml -XPath '//x:row' -Namespace $ns)) {
+                $cn = (Select-Xml -Xml $rn.Node -XPath 'x:c' -Namespace $ns) | Select-Object -First 1
+                if ($cn) { $v = Get-CellVal $cn.Node; if ($v -and "$v".Trim()) { $vals.Add("$v".Trim()) } }
+              }
+              $tagLists[$ts] = $vals.ToArray()
+            }
+          }
+          $zip.Dispose(); $stream.Dispose()
+          Write-Result @{rows=$rows; tag_lists=$tagLists}
+        } catch {
+          Write-Result @{error=$_.Exception.Message; trace=$_.ScriptStackTrace}
+        }
+      PS
 
       tmp_dir    = Dir.tmpdir
-      tmp_script = File.join(tmp_dir, 'bim_parser.py')
+      tmp_script = File.join(tmp_dir, 'bim_parser.ps1')
       tmp_result = File.join(tmp_dir, 'bim_result.json')
 
-      File.write(tmp_script, py_code, encoding: 'UTF-8')
+      File.write(tmp_script, ps_code, encoding: 'UTF-8')
 
-      # Windows: Backslashes zu Forward-Slashes normalisieren
-      norm_path   = path.gsub('\\', '/')
-      safe_script = tmp_script.gsub('\\', '/')
-      safe_result = tmp_result.gsub('\\', '/')
+      norm_path   = path.gsub('/', '\\')
+      win_script  = tmp_script.gsub('/', '\\')
+      win_result  = tmp_result.gsub('/', '\\')
 
-      system("python3 \"#{safe_script}\" \"#{norm_path}\" > \"#{safe_result}\" 2>&1")
-
-      unless File.exist?(tmp_result) && File.size(tmp_result) > 0
-        system("python \"#{safe_script}\" \"#{norm_path}\" > \"#{safe_result}\" 2>&1")
-      end
+      system("powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"#{win_script}\" -XlsxPath \"#{norm_path}\" -OutPath \"#{win_result}\"")
 
       unless File.exist?(tmp_result) && File.size(tmp_result) > 0
-        return [[], {}]
+        return [[], { '__error' => 'PowerShell-Aufruf fehlgeschlagen oder keine Ausgabe erzeugt.' }]
       end
 
-      raw    = File.read(tmp_result, encoding: 'UTF-8').strip
+      bytes  = File.binread(tmp_result)
+      bytes  = bytes[3..] if bytes.start_with?("\xEF\xBB\xBF".b)  # BOM entfernen
+      bytes.force_encoding('UTF-8')
+      # Nur bei wirklich ungültigen Bytes ersetzen, sonst UTF-8 direkt verwenden
+      bytes  = bytes.encode('UTF-8', 'binary', invalid: :replace, undef: :replace) unless bytes.valid_encoding?
+      raw    = bytes.strip
       result = JSON.parse(raw)
 
       File.delete(tmp_script) rescue nil
       File.delete(tmp_result) rescue nil
 
       if result['error']
-        puts "[BIM Import] Python-Fehler: #{result['error']}"
-        return [[], {}]
+        puts "[BIM Import] Fehler: #{result['error']}"
+        puts "[BIM Import] Trace: #{result['trace'].to_s[0..500]}" if result['trace']
+        return [[], { '__error' => result['error'] }]
       end
 
       rows = (result['rows'] || []).map do |r|
@@ -168,7 +234,10 @@ module BimDashboard
       elem_index     = 0
 
       rows.each do |row|
-        if row['e1']
+        next unless row['e2']
+
+        # Neue E1-Gruppe anlegen wenn E1 sich ändert
+        if row['e1'] && row['e1'] != current_e1
           row_y     += max_depth + SPACING * M * 2 unless current_e1.nil?
           current_e1     = row['e1']
           current_e1_grp = top_entities.add_group
@@ -177,10 +246,9 @@ module BimDashboard
           max_depth  = 0.0
           elem_index = 0
           stats[:groups] += 1
-          next
         end
 
-        next unless row['e2'] && current_e1_grp
+        next unless current_e1_grp
 
         palette = PALETTES[e1_palette_map[current_e1] || 0]
         pos     = Geom::Point3d.new(cursor_x, row_y, 0)
@@ -293,7 +361,7 @@ module BimDashboard
         'gewerk'   => row['gewerk'],
         'din276'   => row['kg'],
         'material' => row['material'],
-        'stufe'    => '3',
+        'stufe'    => row['e1'],
       }.each do |key, val|
         entity.set_attribute(DICT_NAME, key, val.to_s) if val && !val.to_s.empty?
       end
@@ -336,31 +404,189 @@ module BimDashboard
     def self.update_library(tag_lists)
       existing = LibraryManager.all_as_hash
 
-      if tag_lists['Tag_Gewerke']
-        items = tag_lists['Tag_Gewerke'].map.with_index do |bez, i|
+      if tag_lists['Tag_Kostenstufe']
+        items = tag_lists['Tag_Kostenstufe'].map.with_index do |bez, i|
+          existing['stufen'].find { |s| s['bezeichnung'] == bez } ||
+            { 'id' => "s_imp_#{i}", 'bezeichnung' => bez, 'beschreibung' => '' }
+        end
+        LibraryManager.update_list('stufen', items.to_json)
+      end
+
+      if tag_lists['Tag_Gewerk']
+        items = tag_lists['Tag_Gewerk'].map.with_index do |bez, i|
           existing['gewerke'].find { |g| g['bezeichnung'] == bez } ||
             { 'id' => "g_imp_#{i}", 'bezeichnung' => bez }
         end
         LibraryManager.update_list('gewerke', items.to_json)
       end
 
-      if tag_lists['Tag_Kostengruppen']
-        items = tag_lists['Tag_Kostengruppen'].map.with_index do |bez, i|
-          kg_nr = bez.match(/^\d+/)&.to_s || ''
-          existing['kostengruppen'].find { |k| k['kg'] == kg_nr } ||
-            { 'id' => "k_imp_#{i}", 'kg' => kg_nr,
-              'bezeichnung' => bez.sub(/^\d+\s*/, ''), 'einheit' => 'm²' }
+      if tag_lists['Tag_Verortung']
+        items = tag_lists['Tag_Verortung'].map.with_index do |bez, i|
+          existing['verortung'].find { |v| v['bezeichnung'] == bez } ||
+            { 'id' => "v_imp_#{i}", 'bezeichnung' => bez }
+        end
+        LibraryManager.update_list('verortung', items.to_json)
+      end
+
+      if tag_lists['Tag_Kostengruppe']
+        items = tag_lists['Tag_Kostengruppe'].map.with_index do |bez, i|
+          existing['kostengruppen'].find { |k| k['kg'] == bez } ||
+            { 'id' => "k_imp_#{i}", 'kg' => bez, 'einheit' => 'm²' }
         end
         LibraryManager.update_list('kostengruppen', items.to_json)
       end
 
-      if tag_lists['Tag_Materialien']
-        items = tag_lists['Tag_Materialien'].map.with_index do |bez, i|
+      if tag_lists['Tag_Material']
+        items = tag_lists['Tag_Material'].map.with_index do |bez, i|
           existing['materialien'].find { |m| m['bezeichnung'] == bez } ||
             { 'id' => "m_imp_#{i}", 'bezeichnung' => bez }
         end
         LibraryManager.update_list('materialien', items.to_json)
       end
+    end
+
+    # -------------------------------------------------------------------------
+    # Excel-Export der Auswertung (Struktur wie Dashboard-Ansicht)
+    # -------------------------------------------------------------------------
+    def self.export_report_excel(out_path, data)
+      tmp_dir    = Dir.tmpdir
+      data_file  = File.join(tmp_dir, 'bim_report_data.json')
+      script_file = File.join(tmp_dir, 'bim_export.ps1')
+
+      File.write(data_file, data.to_json, encoding: 'UTF-8')
+
+      win_data   = data_file.gsub('/', '\\')
+      win_out    = out_path.gsub('/', '\\')
+      win_script = script_file.gsub('/', '\\')
+
+      ps = <<~'PS'
+        param([string]$DataPath, [string]$OutPath)
+        $ErrorActionPreference = 'Stop'
+
+        $raw  = [System.IO.File]::ReadAllText($DataPath, [System.Text.Encoding]::UTF8)
+        $data = $raw | ConvertFrom-Json
+
+        # --- Excel via COM ---
+        $xl  = New-Object -ComObject Excel.Application
+        $xl.Visible        = $false
+        $xl.DisplayAlerts  = $false
+
+        $wb = $xl.Workbooks.Add()
+        $ws = $wb.Worksheets.Item(1)
+        $ws.Name = 'Auswertung'
+
+        function SetCell($r, $c, $val) { $ws.Cells.Item($r,$c) = $val }
+        function BoldCell($r, $c)      { $ws.Cells.Item($r,$c).Font.Bold = $true }
+        function BgCell($r, $c, $rgb)  { $ws.Cells.Item($r,$c).Interior.Color = $rgb }
+        function FgCell($r, $c, $rgb)  { $ws.Cells.Item($r,$c).Font.Color = $rgb }
+
+        $COLS = 6
+        $row  = 1
+
+        # Projekt-Header
+        SetCell $row 1 $data.project; BoldCell $row 1
+        $ws.Cells.Item($row,1).Font.Size = 14
+        $row++
+        SetCell $row 1 ("Erstellt: " + $data.date)
+        $ws.Cells.Item($row,1).Font.Color = 0x888888
+        $row += 2
+
+        # Spalten-Header
+        $headers = @('Name','Kostenstufe','Material','Menge','EP (€)','GB (€)')
+        for ($c = 1; $c -le $COLS; $c++) {
+            SetCell $row $c $headers[$c-1]
+            BoldCell $row $c
+            BgCell $row $c 0x2D3D4E
+            FgCell $row $c 0xFFFFFF
+        }
+        $row++
+
+        # Tiefenfarben (BGR für Excel COM)
+        $sectionBg = @(0xE8EFF5, 0xF0F5F8, 0xF7FAFB)
+
+        foreach ($r in $data.rows) {
+            $indent = '  ' * [int]$r.depth
+
+            switch ($r.type) {
+                'total' {
+                    SetCell $row 1 $r.label; BoldCell $row 1
+                    if ($r.cost -gt 0) { SetCell $row 6 ([math]::Round($r.cost,2)); BoldCell $row 6 }
+                    for ($c=1; $c -le $COLS; $c++) { BgCell $row $c 0xD5E3EF }
+                }
+                'section' {
+                    $d = [int]$r.depth
+                    $bg = $sectionBg[$d % 3]
+                    SetCell $row 1 ($indent + $r.label); BoldCell $row 1
+                    if ($r.cost -gt 0) { SetCell $row 6 ([math]::Round($r.cost,2)); BoldCell $row 6 }
+                    for ($c=1; $c -le $COLS; $c++) { BgCell $row $c $bg }
+                }
+                'group' {
+                    $suffix = if ([int]$r.count -gt 1) { ' (' + [int]$r.count + '×)' } else { '' }
+                    SetCell $row 1 ($indent + $r.name + $suffix); BoldCell $row 1
+                    SetCell $row 2 $r.stufe
+                    SetCell $row 3 $r.material
+                    if ($r.menge -ne $null -and [double]$r.menge -gt 0) {
+                        SetCell $row 4 ([string][math]::Round([double]$r.menge,3) + ' ' + $r.einheit)
+                    }
+                    if ($r.ep -ne $null -and [double]$r.ep -gt 0) {
+                        $ws.Cells.Item($row,5) = [math]::Round([double]$r.ep,2)
+                    }
+                    if ($r.gb -ne $null -and [double]$r.gb -gt 0) {
+                        $ws.Cells.Item($row,6) = [math]::Round([double]$r.gb,2)
+                        BoldCell $row 6
+                    }
+                }
+                'detail' {
+                    SetCell $row 1 ($indent + $r.name)
+                    FgCell $row 1 0x888888
+                    SetCell $row 2 $r.stufe
+                    SetCell $row 3 $r.material
+                    if ($r.menge -ne $null -and [double]$r.menge -gt 0) {
+                        SetCell $row 4 ([string][math]::Round([double]$r.menge,3) + ' ' + $r.einheit)
+                    }
+                    if ($r.ep -ne $null -and [double]$r.ep -gt 0) {
+                        $ws.Cells.Item($row,5) = [math]::Round([double]$r.ep,2)
+                    }
+                    if ($r.gb -ne $null -and [double]$r.gb -gt 0) {
+                        $ws.Cells.Item($row,6) = [math]::Round([double]$r.gb,2)
+                    }
+                }
+                'subtotal' {
+                    SetCell $row 1 ($indent + $r.label)
+                    $ws.Cells.Item($row,1).Font.Italic = $true
+                    if ($r.cost -gt 0) {
+                        SetCell $row 6 ([math]::Round($r.cost,2)); BoldCell $row 6
+                    }
+                    for ($c=1; $c -le $COLS; $c++) { BgCell $row $c 0xF5F5F5 }
+                }
+            }
+            $row++
+        }
+
+        # Kostenzeilen als Währung formatieren
+        $costRange = $ws.Range($ws.Cells.Item(5,5), $ws.Cells.Item($row,6))
+        $costRange.NumberFormat = '#.##0,00 "€"'
+
+        # Spaltenbreite anpassen
+        $ws.Columns.AutoFit() | Out-Null
+        # Erste Spalte mindestens 30 Zeichen
+        if ($ws.Columns.Item(1).ColumnWidth -lt 30) { $ws.Columns.Item(1).ColumnWidth = 30 }
+
+        # Zeilen fixieren (Header einfrieren)
+        $ws.Application.ActiveWindow.SplitRow = 5
+        $ws.Application.ActiveWindow.FreezePanes = $true
+
+        $wb.SaveAs($OutPath, 51)  # 51 = xlOpenXMLWorkbook (.xlsx)
+        $wb.Close($false)
+        $xl.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl) | Out-Null
+        Write-Output 'OK'
+      PS
+
+      File.write(script_file, ps, encoding: 'UTF-8')
+
+      ok = system("powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"#{win_script}\" -DataPath \"#{win_data}\" -OutPath \"#{win_out}\"")
+      raise 'PowerShell-Export fehlgeschlagen (ist Excel installiert?)' unless ok
     end
 
   end

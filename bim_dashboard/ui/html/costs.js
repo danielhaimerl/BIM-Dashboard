@@ -81,7 +81,7 @@ function renderCostReport(report) {
 
   const fmtEur = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
   const fmtNum = v => typeof v === 'number'
-    ? v.toLocaleString('de-DE', { maximumFractionDigits: 3 })
+    ? v.toLocaleString('de-DE', { maximumFractionDigits: 2 })
     : (v || '—');
 
   // --- Gesamt-Header ---

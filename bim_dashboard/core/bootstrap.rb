@@ -11,11 +11,12 @@ module BimDashboard
 
   # Klassifikations-Tags
   TAG_CATEGORIES = {
-    'gewerk'   => 'Gewerk',
-    'din276'   => 'DIN 276 Kostengruppe',
-    'material' => 'Material',
-    'stufe'    => 'Detaillierungsstufe',
-    'preis_id' => 'Preis (Bibliothek)',
+    'gewerk'    => 'Gewerk',
+    'din276'    => 'Kostengruppe',
+    'material'  => 'Material',
+    'stufe'     => 'Kostenstufe',
+    'verortung' => 'Verortung',
+    'preis_id'  => 'Preis (Bibliothek)',
   }.freeze
 
   # Kosten-Tags (nicht im Klassifikations-Editor, werden automatisch gesetzt)
@@ -30,8 +31,8 @@ module BimDashboard
 
   ALL_TAG_KEYS = (TAG_CATEGORIES.keys + COST_TAGS.keys).freeze
 
-  EINHEITEN = %w[m² m³ m Stück].freeze
-  STUFEN    = %w[1 2 3].freeze
+  EINHEITEN = %w[m² m³ m St Stück].freeze
+  STUFEN    = ['01 - Kostenschätzung', '02 - Kostenberechnung Benchmark', '03 - Kostenberechnung Bauteile'].freeze
 
   KG_EINHEIT_DEFAULTS = {
     '310' => 'm³', '320' => 'm³',
@@ -43,18 +44,46 @@ module BimDashboard
 
   PROJECT_META_KEYS = %w[bgf bri gesamtkosten].freeze
 
+  # Bauteilzuordnungen für automatisch ermittelte Kennzahlen.
+  # key = Kennzahl, value = exakte Bauteilbezeichnung im Modell.
+  # Aggregationsmethoden für Kennzahlen
+  ELEMENT_AGGREGATIONS = [
+    { 'value' => 'count',      'label' => 'Anzahl (Stück)' },
+    { 'value' => 'menge_auto', 'label' => 'Menge Auto (m², m³, …)' },
+  ].freeze
+
+  # Standardzuordnungen: filter = Name oder Pfad-Segment, aggregation = count|menge_auto
+  ELEMENT_MAPPING_DEFAULTS = {
+    'wohnungen' => { 'filter' => 'Wohnungseingangstür',    'aggregation' => 'count'      },
+    'bgf'       => { 'filter' => 'BGF - Bruttogrundfläche','aggregation' => 'menge_auto' },
+    'bri'       => { 'filter' => 'BRI - Bruttorauminhalt', 'aggregation' => 'menge_auto' },
+  }.freeze
+
+  ELEMENT_MAPPING_FIELDS = [
+    { 'key' => 'wohnungen', 'label' => 'Wohnungen',
+      'unit' => 'WE',
+      'hint' => 'Filter: Elementname oder Pfad (z.B. "Wohnungseingangstür" oder "Stufe/BGF - Bruttogrundfläche")' },
+    { 'key' => 'bgf', 'label' => 'BGF – Bruttogrundfläche',
+      'unit' => 'm²',
+      'hint' => 'Pfad-Filter möglich, z.B. "01 - Kostenschätzung/BGF - Bruttogrundfläche"' },
+    { 'key' => 'bri', 'label' => 'BRI – Bruttorauminhalt',
+      'unit' => 'm³',
+      'hint' => 'Pfad-Filter möglich, z.B. "01 - Kostenschätzung/BRI - Bruttorauminhalt"' },
+  ].freeze
+
   DICT_NAME    = 'BimDashboard'.freeze
   DICT_PROJECT = 'BimDashboard_Project'.freeze
   DICT_LIBRARY = 'BimDashboard_Library'.freeze
 
-  require File.join(CORE_DIR, 'tag_manager')
-  require File.join(CORE_DIR, 'observer')
-  require File.join(CORE_DIR, 'isolate')
-  require File.join(CORE_DIR, 'quantity_calculator')
-  require File.join(CORE_DIR, 'library_manager')
-  require File.join(CORE_DIR, 'cost_manager')
-  require File.join(CORE_DIR, 'model_builder')
-  require File.join(UI_DIR,   'dialog')
-  require File.join(PLUGIN_DIR, 'menu')
+  load File.join(CORE_DIR, 'tag_manager.rb')
+  load File.join(CORE_DIR, 'observer.rb')
+  load File.join(CORE_DIR, 'isolate.rb')
+  load File.join(CORE_DIR, 'quantity_calculator.rb')
+  load File.join(CORE_DIR, 'library_manager.rb')
+  load File.join(CORE_DIR, 'cost_manager.rb')
+  load File.join(CORE_DIR, 'ai_agent.rb')
+  load File.join(CORE_DIR, 'model_builder.rb')
+  load File.join(UI_DIR,   'dialog.rb')
+  load File.join(PLUGIN_DIR, 'menu.rb')
 
 end

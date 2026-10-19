@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Modulbau-Simulator – Wohnheime / Budget-Hotels</title>
+<style>
+  :root { --acc:#2c7be5; --bg:#f4f6f8; --line:#d7dce1; }
+  html,body { margin:0; padding:0; height:100%; font-family:Segoe UI, Arial, sans-serif; color:#222; }
+  #app { display:flex; flex-direction:column; height:100vh; width:100vw; box-sizing:border-box; }
+
+  /* Toolbar */
+  #toolbar { display:flex; align-items:center; gap:6px; padding:6px 10px; background:#1f2a36; flex-wrap:wrap; }
+  #toolbar .grp { display:flex; gap:4px; padding-right:10px; border-right:1px solid #3a4a5c; }
+  #toolbar .grp:last-child { border-right:none; }
+  .tbtn {
+    padding:7px 12px; border-radius:5px; border:1px solid #3a4a5c; cursor:pointer;
+    font-size:12px; color:#eaf0f6; background:#2a3a4a; white-space:nowrap;
+  }
+  .tbtn.active { background:var(--acc); border-color:var(--acc); }
+  .tbtn:hover { background:#36495c; }
+  .tbtn.swatch::before { content:""; display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
+  #t-wohn.swatch::before { background:#cfe3f7; }
+  #t-flur.swatch::before { background:#e8e8e8; }
+  #t-kern.swatch::before { background:#f7d6a3; }
+  #t-service.swatch::before { background:#d7f0d0; }
+
+  /* Body: sidebar + 2D + 3D */
+  #main { flex:1; display:flex; min-height:0; }
+  #sidebar {
+    width:280px; background:var(--bg); border-right:1px solid var(--line);
+    overflow-y:auto; padding:14px; box-sizing:border-box; font-size:12px;
+  }
+  #sidebar h3 { font-size:12.5px; margin:16px 0 8px; color:#34495e; border-bottom:1px solid var(--line); padding-bottom:4px; text-transform:uppercase; letter-spacing:.03em; }
+  #sidebar h3:first-child { margin-top:0; }
+  .field { margin-bottom:8px; }
+  .field label { display:block; color:#555; margin-bottom:3px; }
+  .field input, .field select {
+    width:100%; padding:5px 6px; box-sizing:border-box;
+    border:1px solid #c6cdd3; border-radius:4px; font-size:12px;
+  }
+  .row2 { display:flex; gap:6px; }
+  .row2 .field { flex:1; }
+  button.full {
+    width:100%; padding:8px; margin-top:4px;
+    background:var(--acc); color:#fff; border:none; border-radius:4px; font-size:12px; cursor:pointer;
+  }
+  button.full:hover { background:#1f64c4; }
+  button.full.warn { background:#c0392b; }
+  button.full.warn:hover { background:#9c2c20; }
+
+  #ampelBox { display:flex; align-items:center; gap:10px; padding:10px; border-radius:6px; background:#fff; border:1px solid var(--line); }
+  #ampelLight { width:22px; height:22px; border-radius:50%; flex-shrink:0; box-shadow: inset 0 0 4px rgba(0,0,0,.3); }
+  #ampelText b { display:block; font-size:13px; }
+  #ampelText span { color:#666; font-size:11px; }
+
+  #viewers { flex:1; display:flex; min-width:0; }
+  #plan2d, #view3d { flex:1; position:relative; overflow:hidden; border-right:1px solid var(--line); }
+  #view3d { border-right:none; }
+  #plan2d canvas { display:block; cursor:crosshair; background:#fbfcfd; }
+  .paneLabel {
+    position:absolute; top:6px; left:8px; font-size:11px; color:#8a93a0;
+    background:rgba(255,255,255,.75); padding:2px 6px; border-radius:4px; pointer-events:none; z-index:2;
+  }
+  #zoomCtl { position:absolute; bottom:8px; right:8px; display:flex; gap:4px; z-index:2; }
+  #zoomCtl button { width:26px; height:26px; border:1px solid var(--line); background:#fff; border-radius:4px; cursor:pointer; font-size:14px; }
+
+  /* Footer KPI bar */
+  #footer {
+    display:flex; gap:0; background:#1f2a36; color:#eaf0f6; font-size:12px;
+    padding:8px 4px; flex-wrap:wrap;
+  }
+  .kpi { flex:1; min-width:120px; text-align:center; padding:4px 8px; border-right:1px solid #344252; }
+  .kpi:last-child { border-right:none; }
+  .kpi .val { font-size:16px; font-weight:600; }
+  .kpi .lbl { font-size:10px; color:#9fb0c2; text-transform:uppercase; letter-spacing:.03em; }
+  .kpi .val.warn { color:#ff8a65; }
+  .kpi .val.ok { color:#7ed6a5; }
+
+  /* Modals (Mengen & Kosten / LCA-Analyse / DGNB-Zertifizierung) */
+  .modalOverlay {
+    position:fixed; inset:0; background:rgba(20,28,38,.55);
+    display:none; align-items:center; justify-content:center; z-index:50;
+  }
+  .modalOverlay.open { display:flex; }
+  .modalBox {
+    background:#fff; border-radius:8px; width:700px; max-width:92vw; max-height:86vh;
+    overflow-y:auto; padding:18px 22px; box-shadow:0 12px 40px rgba(0,0,0,.3);
+  }
+  .modalBox h2 { margin:0 0 4px; font-size:16px; color:#1f2a36; }
+  .modalBox .sub { font-size:11.5px; color:#7a8493; margin-bottom:14px; }
+  .summaryBoxes { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .summaryBoxes .box { flex:1; min-width:140px; background:#f4f6f8; border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .summaryBoxes .box .lbl { font-size:10.5px; color:#7a8493; text-transform:uppercase; letter-spacing:.03em; }
+  .summaryBoxes .box .val { font-size:18px; font-weight:700; color:#1f2a36; margin-top:2px; }
+  .summaryBoxes .box .sub2 { font-size:10.5px; color:#9aa3ad; }
+  .effClass {
+    display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
+    border-radius:6px; font-weight:700; font-size:16px; color:#fff;
+  }
+  .reportTable { width:100%; border-collapse:collapse; font-size:12px; }
+  .reportTable td.caala { font-size:11px; color:#5a6472; white-space:nowrap; }
+  .reportTable input.co2, .reportTable input.bench {
+    width:70px; padding:4px 6px; border:1px solid #c6cdd3; border-radius:4px; font-size:12px; text-align:right;
+  }
+  .reportTable tr.groupHeader td {
+    background:#eef3f8; color:#2c5282; font-weight:700; font-size:11px;
+    text-transform:uppercase; letter-spacing:.03em; padding:8px 8px; border-bottom:1px solid var(--line);
+  }
+  .reportTable th { text-align:left; color:#6b7686; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.03em; padding:6px 8px; border-bottom:2px solid var(--line); }
+  .reportTable td { padding:7px 8px; border-bottom:1px solid #eef1f4; }
+  .reportTable td.num, .reportTable th.num { text-align:right; }
+  .reportTable input.price {
+    width:90px; padding:4px 6px; border:1px solid #c6cdd3; border-radius:4px; font-size:12px; text-align:right;
+  }
+  .reportTable tfoot td { font-weight:700; border-bottom:none; border-top:2px solid var(--line); padding-top:10px; }
+  .modalClose {
+    margin-top:16px; padding:8px 16px; background:var(--acc); color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12.5px;
+  }
+  .modalClose:hover { background:#1f64c4; }
+  .conformTable { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+  .conformTable th { text-align:left; color:#6b7686; font-weight:600; font-size:11px; text-transform:uppercase; padding:6px 8px; border-bottom:2px solid var(--line); }
+  .conformTable td { padding:7px 8px; border-bottom:1px solid #eef1f4; }
+  .conformTable td.num { text-align:right; }
+  .badge { display:inline-block; width:18px; height:18px; line-height:18px; text-align:center; border-radius:50%; color:#fff; font-size:11px; font-weight:700; }
+  .badge.ok { background:#2ecc71; }
+  .badge.fail { background:#e74c3c; }
+  .dgnbSource { font-size:10.5px; color:#9aa3ad; margin-top:14px; }
+  .modalBox.wide { width:960px; }
+  .tableScroll { overflow-x:auto; }
+  .reportTable input.stage { width:54px; padding:3px 4px; border:1px solid #c6cdd3; border-radius:4px; font-size:11px; text-align:right; }
+  .reportTable th.stageHdr { font-size:9.5px; line-height:1.3; }
+  .phaseBoxes { display:flex; gap:8px; margin:14px 0; flex-wrap:wrap; }
+  .phaseBoxes .pbox { flex:1; min-width:90px; background:#f4f6f8; border:1px solid var(--line); border-radius:6px; padding:8px 10px; text-align:center; }
+  .phaseBoxes .pbox .plbl { font-size:9.5px; color:#7a8493; text-transform:uppercase; }
+  .phaseBoxes .pbox .pval { font-size:14px; font-weight:700; color:#1f2a36; margin-top:2px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="toolbar">
+    <div class="grp">
+      <div class="tbtn swatch" id="t-wohn" data-type="wohn">Wohnmodul</div>
+      <div class="tbtn swatch" id="t-flur" data-type="flur">Flur</div>
+      <div class="tbtn swatch" id="t-kern" data-type="kern">Erschließungskern</div>
+      <div class="tbtn swatch" id="t-service" data-type="service">Serviceraum</div>
+    </div>
+    <div class="grp">
+      <div class="tbtn" id="t-select">↖ Auswahl / Verschieben</div>
+      <div class="tbtn" id="t-rotate">⟲ Drehen 90°</div>
+      <div class="tbtn" id="t-delete">🗑 Löschen</div>
+    </div>
+    <div class="grp">
+      <div class="tbtn" id="t-clear">⨯ Grundriss leeren</div>
+    </div>
+    <div class="grp">
+      <div class="tbtn" id="t-report">📊 Mengen &amp; Kosten</div>
+      <div class="tbtn" id="t-lca">♻ LCA-Analyse</div>
+      <div class="tbtn" id="t-dgnb">🌱 DGNB-Zertifizierung</div>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="sidebar">
+      <h3>Modulmaße</h3>
+      <div class="row2">
+        <div class="field"><label>Wohnmodul-Breite (cm)</label><input type="number" id="wohnW" value="370" step="12.5" min="200"></div>
+        <div class="field"><label>Wohnmodul-Tiefe (cm)</label><input type="number" id="wohnD" value="750" step="12.5" min="300"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Flurbreite (cm)</label><input type="number" id="corrW" value="150" step="12.5" min="100"></div>
+        <div class="field"><label>Kerngröße (cm)</label><input type="number" id="kernSize" value="450" step="12.5" min="300"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Geschosse</label><input type="number" id="floors" value="4" step="1" min="1"></div>
+        <div class="field"><label>Geschosshöhe (m)</label><input type="number" id="floorHeight" value="3.0" step="0.05" min="2.2"></div>
+      </div>
+
+      <h3>Grundriss-Generator</h3>
+      <div class="field">
+        <label>Bundtyp</label>
+        <select id="genType">
+          <option value="zweibund">Zweibund (Module beidseitig)</option>
+          <option value="einbund">Einbund (Module einseitig)</option>
+        </select>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Module pro Reihe</label><input type="number" id="genCount" value="10" step="1" min="2"></div>
+        <div class="field"><label>Max. Riegellänge bis 2. Kern (m)</label><input type="number" id="genMaxRun" value="30" step="1" min="5"></div>
+      </div>
+      <button class="full" id="genBtn">Beispielgrundriss generieren</button>
+
+      <h3>Transport-Ampel</h3>
+      <div id="ampelBox">
+        <div id="ampelLight"></div>
+        <div id="ampelText"><b id="ampelTitle">–</b><span id="ampelSub">–</span></div>
+      </div>
+
+      <h3>Fensterformat</h3>
+      <div class="field">
+        <select id="windowFormat">
+          <option value="standard">Standard liegend (120×120, BOK 90)</option>
+          <option value="hochformat" selected>Hochformat (90×150, BOK 60)</option>
+          <option value="panorama">Panoramafenster (200×220, BOK 30)</option>
+          <option value="klein">Klein / Bad (60×60, BOK 150)</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="viewers">
+      <div id="plan2d">
+        <div class="paneLabel">2D-Grundriss (Raster 12,5 cm)</div>
+        <canvas id="canvas2d"></canvas>
+        <div id="zoomCtl">
+          <button id="zoomOut">−</button>
+          <button id="zoomFit">⤢</button>
+          <button id="zoomIn">+</button>
+        </div>
+      </div>
+      <div id="view3d">
+        <div class="paneLabel">3D-Ansicht (synchron)</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="footer">
+    <div class="kpi"><div class="val" id="kpiWohnflaeche">0 m²</div><div class="lbl">Wohnfläche</div></div>
+    <div class="kpi"><div class="val" id="kpiAvgUnit">0 m²</div><div class="lbl">Ø je Einheit</div></div>
+    <div class="kpi"><div class="val" id="kpiVerkehr">0 m²</div><div class="lbl">Verkehrsfläche</div></div>
+    <div class="kpi"><div class="val" id="kpiVfAnteil">0 %</div><div class="lbl">VF-Anteil (Förder-Marke 25 %)</div></div>
+    <div class="kpi"><div class="val" id="kpiFootprint">0 m²</div><div class="lbl">Footprint</div></div>
+    <div class="kpi"><div class="val" id="kpiHeight">0 m</div><div class="lbl">Gebäudehöhe</div></div>
+  </div>
+
+  <!-- ============ Mengen & Kosten ============ -->
+  <div id="reportOverlay" class="modalOverlay">
+    <div class="modalBox">
+      <h2>Mengen &amp; Kosten</h2>
+      <div class="sub">Heuristische Vorentwurfs-Mengenermittlung aus dem aktuellen Modell (alle Geschosse). Einheitspreise frei editierbar.</div>
+      <div class="summaryBoxes">
+        <div class="box">
+          <div class="lbl">Gesamtkosten</div>
+          <div class="val" id="cost-total">0 €</div>
+          <div class="sub2">Menge × Einheitspreis, alle Positionen</div>
+        </div>
+      </div>
+      <table class="reportTable" id="costTable">
+        <thead>
+          <tr><th>Position</th><th class="num">Menge</th><th>Einheit</th><th class="num">Einheitspreis (€)</th><th class="num">Gesamtkosten (€)</th></tr>
+        </thead>
+        <tbody>
+          <tr data-row="extWall"><td>Außenwände (netto, ohne Fenster)</td><td class="num" id="qty-extWall">0,0</td><td>m²</td>
+            <td class="num"><input class="price" id="price-extWall" type="number" step="1" value="450"></td><td class="num" id="cost-extWall">0 €</td></tr>
+          <tr data-row="roof"><td>Dach</td><td class="num" id="qty-roof">0,0</td><td>m²</td>
+            <td class="num"><input class="price" id="price-roof" type="number" step="1" value="320"></td><td class="num" id="cost-roof">0 €</td></tr>
+          <tr data-row="groundSlab"><td>Bodenplatte (Erdgeschoss)</td><td class="num" id="qty-groundSlab">0,0</td><td>m²</td>
+            <td class="num"><input class="price" id="price-groundSlab" type="number" step="1" value="210"></td><td class="num" id="cost-groundSlab">0 €</td></tr>
+          <tr data-row="midSlab"><td>Decken (Geschossdecken)</td><td class="num" id="qty-midSlab">0,0</td><td>m²</td>
+            <td class="num"><input class="price" id="price-midSlab" type="number" step="1" value="180"></td><td class="num" id="cost-midSlab">0 €</td></tr>
+          <tr data-row="intWall"><td>Innenwände (netto, ohne Türen)</td><td class="num" id="qty-intWall">0,0</td><td>m²</td>
+            <td class="num"><input class="price" id="price-intWall" type="number" step="1" value="220"></td><td class="num" id="cost-intWall">0 €</td></tr>
+          <tr data-row="window"><td>Fenster</td><td class="num" id="qty-window">0</td><td>Stk</td>
+            <td class="num"><input class="price" id="price-window" type="number" step="10" value="650"></td><td class="num" id="cost-window">0 €</td></tr>
+          <tr data-row="door"><td>Türen</td><td class="num" id="qty-door">0</td><td>Stk</td>
+            <td class="num"><input class="price" id="price-door" type="number" step="10" value="450"></td><td class="num" id="cost-door">0 €</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="4">Gesamtkosten</td><td class="num" id="cost-total2">0 €</td></tr></tfoot>
+      </table>
+      <button class="modalClose" data-target="reportOverlay">Schließen</button>
+    </div>
+  </div>
+
+  <!-- ============ LCA-Analyse (Lebenszyklusbetrachtung nach EN 15978) ============ -->
+  <div id="lcaOverlay" class="modalOverlay">
+    <div class="modalBox wide">
+      <h2>LCA-Analyse — Lebenszyklusbetrachtung (GWP, Module nach EN 15978)</h2>
+      <div class="sub">Heuristische Ökobilanz je Bauteil über den Lebenszyklus: A1-A3 Herstellung, A4 Transport, A5 Errichtung, B4 Austausch (Ersatz während Nutzung), C3-C4 Entsorgung, D Gutschriften (Recycling/Wiederverwendung). Alle Faktoren in kg CO₂e je Einheit, frei editierbar Platzhalter.</div>
+
+      <div class="phaseBoxes">
+        <div class="pbox"><div class="plbl">A1-A3 Herstellung</div><div class="pval" id="lca-phase-a13">0</div></div>
+        <div class="pbox"><div class="plbl">A4 Transport</div><div class="pval" id="lca-phase-a4">0</div></div>
+        <div class="pbox"><div class="plbl">A5 Errichtung</div><div class="pval" id="lca-phase-a5">0</div></div>
+        <div class="pbox"><div class="plbl">B4 Austausch</div><div class="pval" id="lca-phase-b4">0</div></div>
+        <div class="pbox"><div class="plbl">C3-C4 Entsorgung</div><div class="pval" id="lca-phase-c34">0</div></div>
+        <div class="pbox"><div class="plbl">D Gutschriften</div><div class="pval" id="lca-phase-d">0</div></div>
+      </div>
+      <div class="summaryBoxes">
+        <div class="box"><div class="lbl">GWP gesamt (A-C, ohne D)</div><div class="val" id="lca-totalAC">0 kg CO₂e</div><div class="sub2">Summe aller Module ohne Gutschriften</div></div>
+        <div class="box"><div class="lbl">GWP netto (inkl. D)</div><div class="val" id="lca-totalNet">0 kg CO₂e</div><div class="sub2" id="lca-totalPerM2a">0,0 kg CO₂e/(m²NRFa)</div></div>
+      </div>
+
+      <div class="tableScroll">
+      <table class="reportTable" id="lcaTable">
+        <thead>
+          <tr>
+            <th>Position</th><th>CAALA-ID</th><th class="num">Menge</th><th>Einh.</th>
+            <th class="num stageHdr">A1-A3<br>Herstellung</th>
+            <th class="num stageHdr">A4<br>Transport</th>
+            <th class="num stageHdr">A5<br>Errichtung</th>
+            <th class="num stageHdr">B4<br>Austausch</th>
+            <th class="num stageHdr">C3-C4<br>Entsorgung</th>
+            <th class="num stageHdr">D<br>Gutschrift</th>
+            <th class="num">Summe (kg)</th>
+          </tr>
+        </thead>
+        <tbody id="lcaTbody">
+          <!-- Zeilen werden per JS aus LCA_ROWS erzeugt -->
+        </tbody>
+        <tfoot><tr>
+          <td colspan="4">Summe je Modul</td>
+          <td class="num" id="lca-col-a13">0</td>
+          <td class="num" id="lca-col-a4">0</td>
+          <td class="num" id="lca-col-a5">0</td>
+          <td class="num" id="lca-col-b4">0</td>
+          <td class="num" id="lca-col-c34">0</td>
+          <td class="num" id="lca-col-d">0</td>
+          <td class="num" id="lca-col-total">0</td>
+        </tr></tfoot>
+      </table>
+      </div>
+      <div class="dgnbSource">Lebenszyklusmodule gemäß EN 15978 / DIN EN 15978; Faktoren sind Platzhalter ohne Bezug zu einer realen EPD-/Ökobaudat-Datenbank.</div>
+      <button class="modalClose" data-target="lcaOverlay">Schließen</button>
+    </div>
+  </div>
+
+  <!-- ============ DGNB-Zertifizierung ============ -->
+  <div id="dgnbOverlay" class="modalOverlay">
+    <div class="modalBox">
+      <h2>DGNB-Zertifizierung — Kriterium ENV1.1 (Ökobilanz Gebäude, Neubau 2023)</h2>
+      <div class="sub">Heuristische Lebenszyklus-Abschätzung der Bauteilherstellung je CAALA-Kategorie. Ersetzt keine zertifizierte Ökobilanz nach DGNB-Kriterium ENV1.1 — Faktoren und Grenz-/Zielwerte sind frei editierbar Platzhalter.</div>
+
+      <div class="summaryBoxes">
+        <div class="box"><div class="lbl">GWP gesamt</div><div class="val" id="dgnb-gwpTotal">0 kg CO₂e</div><div class="sub2" id="dgnb-gwpPerM2a">0,0 kg CO₂e/(m²NRFa)</div></div>
+        <div class="box"><div class="lbl">PENRT gesamt</div><div class="val" id="dgnb-penrtTotal">0 kWh</div><div class="sub2" id="dgnb-penrtPerM2a">0,0 kWh/(m²NRFa)</div></div>
+        <div class="box"><div class="lbl">Energieeffizienzklasse</div><div class="val"><span class="effClass" id="dgnb-effClass">–</span></div><div class="sub2" id="dgnb-effHint">heuristisch, GWP-basiert</div></div>
+        <div class="box"><div class="lbl">Betrachtungszeitraum</div><div class="val"><input type="number" id="dgnb-rp" value="50" step="1" style="width:55px; font-size:14px;"> Jahre</div><div class="sub2">DGNB-Referenzzeitraum Neubau</div></div>
+      </div>
+
+      <h3 style="margin:0 0 6px; font-size:12px; color:#34495e;">Konformität gemäß Rahmenwerk</h3>
+      <table class="conformTable" id="dgnbConformTable">
+        <thead><tr><th>Indikator</th><th class="num">Wert</th><th class="num">Grenzwert</th><th class="num">Zielwert</th><th class="num">Status</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>GWP <span style="color:#9aa3ad;">kg CO₂e/(m²NRFa)</span></td>
+            <td class="num" id="dgnb-gwpVal">0,0</td>
+            <td class="num"><input class="bench" id="dgnb-gwpGrenz" type="number" step="1" value="24"></td>
+            <td class="num"><input class="bench" id="dgnb-gwpZiel" type="number" step="1" value="18"></td>
+            <td class="num"><span class="badge" id="dgnb-gwpBadge">–</span></td>
+          </tr>
+          <tr>
+            <td>PENRT <span style="color:#9aa3ad;">kWh/(m²NRFa)</span></td>
+            <td class="num" id="dgnb-penrtVal">0,0</td>
+            <td class="num"><input class="bench" id="dgnb-penrtGrenz" type="number" step="1" value="100"></td>
+            <td class="num"><input class="bench" id="dgnb-penrtZiel" type="number" step="1" value="80"></td>
+            <td class="num"><span class="badge" id="dgnb-penrtBadge">–</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="sub">GWP-Werte werden aus der <b>LCA-Analyse</b> (eigener Menüpunkt) übernommen. Hier nur PENRT (nicht erneuerbarer Primärenergiebedarf, Herstellung) je Bauteil:</div>
+      <table class="reportTable" id="dgnbTable">
+        <thead>
+          <tr><th>Position</th><th>CAALA-ID</th><th class="num">Menge</th><th>Einheit</th>
+              <th class="num">PENRT-Faktor</th><th class="num">PENRT (kWh)</th></tr>
+        </thead>
+        <tbody>
+          <tr class="groupHeader"><td colspan="6">Thermische Bauteile</td></tr>
+          <tr data-row="extWall"><td>Außenwände</td><td class="caala">CAALA_A01</td><td class="num" id="d-qty-extWall">0,0</td><td>m²</td>
+            <td class="num"><input class="co2" id="penrtf-extWall" type="number" step="1" value="180"></td><td class="num" id="penrt-extWall">0</td></tr>
+          <tr data-row="roof"><td>Dach</td><td class="caala">CAALA_A03</td><td class="num" id="d-qty-roof">0,0</td><td>m²</td>
+            <td class="num"><input class="co2" id="penrtf-roof" type="number" step="1" value="220"></td><td class="num" id="penrt-roof">0</td></tr>
+          <tr data-row="groundSlab"><td>Bodenplatte</td><td class="caala">CAALA_A11</td><td class="num" id="d-qty-groundSlab">0,0</td><td>m²</td>
+            <td class="num"><input class="co2" id="penrtf-groundSlab" type="number" step="1" value="160"></td><td class="num" id="penrt-groundSlab">0</td></tr>
+          <tr data-row="window"><td>Fenster</td><td class="caala">CAALA_A12</td><td class="num" id="d-qty-window">0</td><td>Stk</td>
+            <td class="num"><input class="co2" id="penrtf-window" type="number" step="5" value="480"></td><td class="num" id="penrt-window">0</td></tr>
+
+          <tr class="groupHeader"><td colspan="6">Nicht-Thermische Bauteile</td></tr>
+          <tr data-row="midSlab"><td>Decken</td><td class="caala">CAALA_B01</td><td class="num" id="d-qty-midSlab">0,0</td><td>m²</td>
+            <td class="num"><input class="co2" id="penrtf-midSlab" type="number" step="1" value="120"></td><td class="num" id="penrt-midSlab">0</td></tr>
+          <tr data-row="intWall"><td>Innenwände</td><td class="caala">CAALA_B02</td><td class="num" id="d-qty-intWall">0,0</td><td>m²</td>
+            <td class="num"><input class="co2" id="penrtf-intWall" type="number" step="1" value="100"></td><td class="num" id="penrt-intWall">0</td></tr>
+          <tr data-row="door"><td>Türen</td><td class="caala">CAALA_B09</td><td class="num" id="d-qty-door">0</td><td>Stk</td>
+            <td class="num"><input class="co2" id="penrtf-door" type="number" step="5" value="240"></td><td class="num" id="penrt-door">0</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="5">Summe</td><td class="num" id="penrt-total2">0 kWh</td></tr></tfoot>
+      </table>
+      <div class="dgnbSource">Quelle Kriteriensteckbrief: DGNB ENV1.1 „Gebäude Neubau", Version 2023.</div>
+      <button class="modalClose" data-target="dgnbOverlay">Schließen</button>
+    </div>
+  </div>
+
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================== CONSTANTS ============================== */
+const GRID = 12.5;          // cm Rastersnapping
+const SNAP_NEIGHBOR = 20;   // cm Einfangradius fürs Andocken
+const EPS = 1;              // cm Toleranz für "berührt"
+
+const WINDOW_FORMATS = {
+  standard:  { w:120, h:120, sill:90  },
+  hochformat:{ w:90,  h:150, sill:60  },
+  panorama:  { w:200, h:220, sill:30  },
+  klein:     { w:60,  h:60,  sill:150 },
+};
+
+const TYPE_META = {
+  wohn:    { label:'Wohnmodul',          color:'#cfe3f7', wallHex:0xd8d3c4, hasWindows:true  },
+  flur:    { label:'Flur',               color:'#e8e8e8', wallHex:0xb9bec4, hasWindows:false },
+  kern:    { label:'Erschließungskern',  color:'#f7d6a3', wallHex:0xc9a36b, hasWindows:false },
+  service: { label:'Serviceraum',        color:'#d7f0d0', wallHex:0xb6cdb0, hasWindows:false },
+};
+
+/* ============================== STATE ============================== */
+let modules = []; // {id,type,x,y,w,d}  (cm, w along X, d along Y)
+let nextId = 1;
+let selectedId = null;
+let currentTool = null; // 'wohn' | 'flur' | 'kern' | 'service' | null (selection mode)
+
+function cfg() {
+  return {
+    wohnW: num('wohnW', 370), wohnD: num('wohnD', 750),
+    corrW: num('corrW', 150), kernSize: num('kernSize', 450),
+    serviceW: 250, serviceD: 300,
+    floors: Math.max(1, parseInt(document.getElementById('floors').value) || 1),
+    floorHeight: parseFloat(document.getElementById('floorHeight').value) || 3.0,
+    windowFormat: document.getElementById('windowFormat').value,
+  };
+}
+function num(id, def) { const v = parseFloat(document.getElementById(id).value); return isFinite(v) ? v : def; }
+
+function defaultDimsFor(type) {
+  const c = cfg();
+  if (type === 'wohn') return { w:c.wohnW, d:c.wohnD };
+  if (type === 'flur') return { w:c.corrW, d:c.wohnD };
+  if (type === 'kern') return { w:c.kernSize, d:c.kernSize };
+  if (type === 'service') return { w:c.serviceW, d:c.serviceD };
+}
+
+/* ============================== GEOMETRY HELPERS ============================== */
+function snap(v) { return Math.round(v / GRID) * GRID; }
+
+function rectsOverlap(a, b) {
+  return (a.x + a.w - EPS > b.x) && (b.x + b.w - EPS > a.x) &&
+         (a.y + a.d - EPS > b.y) && (b.y + b.d - EPS > a.y);
+}
+
+function overlapsAny(rect, excludeId) {
+  return modules.some(m => m.id !== excludeId && rectsOverlap(rect, m));
+}
+
+function snapToNeighbors(rect, excludeId) {
+  let bestX = null, bestXDist = SNAP_NEIGHBOR + 1;
+  let bestY = null, bestYDist = SNAP_NEIGHBOR + 1;
+  for (const m of modules) {
+    if (m.id === excludeId) continue;
+    // candidates for x alignment: only if y-ranges could plausibly overlap nearby
+    const xCandidates = [m.x - rect.w, m.x + m.w, m.x, m.x + m.w - rect.w];
+    for (const cx of xCandidates) {
+      const dist = Math.abs(cx - rect.x);
+      if (dist < bestXDist) { bestXDist = dist; bestX = cx; }
+    }
+    const yCandidates = [m.y - rect.d, m.y + m.d, m.y, m.y + m.d - rect.d];
+    for (const cy of yCandidates) {
+      const dist = Math.abs(cy - rect.y);
+      if (dist < bestYDist) { bestYDist = dist; bestY = cy; }
+    }
+  }
+  const out = { ...rect };
+  if (bestX !== null && bestXDist <= SNAP_NEIGHBOR) out.x = snap(bestX);
+  if (bestY !== null && bestYDist <= SNAP_NEIGHBOR) out.y = snap(bestY);
+  return out;
+}
+
+// Returns the neighboring module touching `m` on the given side, or null if none (= exterior)
+function findAdjacent(m, side, all) {
+  const eps = EPS;
+  for (const o of all) {
+    if (o.id === m.id) continue;
+    if (side === 'N' && Math.abs(o.y - (m.y + m.d)) < eps &&
+        o.x < m.x + m.w - eps && o.x + o.w > m.x + eps) return o;
+    if (side === 'S' && Math.abs((o.y + o.d) - m.y) < eps &&
+        o.x < m.x + m.w - eps && o.x + o.w > m.x + eps) return o;
+    if (side === 'E' && Math.abs(o.x - (m.x + m.w)) < eps &&
+        o.y < m.y + m.d - eps && o.y + o.d > m.y + eps) return o;
+    if (side === 'W' && Math.abs((o.x + o.w) - m.x) < eps &&
+        o.y < m.y + m.d - eps && o.y + o.d > m.y + eps) return o;
+  }
+  return null;
+}
+// Returns true if the given side of `m` faces the building exterior (no adjoining module)
+function isExteriorSide(m, side, all) { return findAdjacent(m, side, all) === null; }
+
+// Wall length (cm) for a given side of a module footprint
+function sideLengthCm(m, side) { return (side === 'N' || side === 'S') ? m.w : m.d; }
+
+// Whether a door should be assumed on an interior wall between these two module types
+function isDoorableInterior(typeA, typeB) {
+  const pair = [typeA, typeB].sort().join('-');
+  return pair === 'flur-wohn' || pair === 'flur-service' || pair === 'flur-kern';
+}
+
+const DOOR_W = 90, DOOR_H = 210; // cm, Standard-Türblatt
+
+function computeQuantities(modulesList, c) {
+  const fmt = WINDOW_FORMATS[c.windowFormat];
+  const margin = 40; // cm Randabstand fürs Fenster, wie in rebuild3D
+  let extWallArea = 0, intWallArea = 0, windowCount = 0, doorCount = 0;
+  const doorAreaM2 = (DOOR_W / 100) * (DOOR_H / 100);
+  const windowAreaM2 = (fmt.w / 100) * (fmt.h / 100);
+
+  // Bodenplatte (CAALA_A11) je Geschossfläche; Geschossdecken zwischen beheizten
+  // Ebenen (CAALA_B01) sind nicht-thermisch; Dach (CAALA_A03) = oberste Hülllinie.
+  let footprintArea = 0, minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const m of modulesList) {
+    footprintArea += (m.w / 100) * (m.d / 100);
+    minX = Math.min(minX, m.x); minY = Math.min(minY, m.y);
+    maxX = Math.max(maxX, m.x + m.w); maxY = Math.max(maxY, m.y + m.d);
+  }
+  const groundSlabArea = footprintArea;                         // CAALA_A11, 1x
+  const midSlabArea = footprintArea * Math.max(0, c.floors - 1); // CAALA_B01, je weiteres Geschoss
+  const roofArea = modulesList.length ? ((maxX - minX) / 100) * ((maxY - minY) / 100) : 0; // CAALA_A03
+
+  for (let fl = 0; fl < c.floors; fl++) {
+    for (const m of modulesList) {
+      const meta = TYPE_META[m.type];
+      for (const side of ['N', 'S', 'E', 'W']) {
+        const neighbor = findAdjacent(m, side, modulesList);
+        const lengthM = sideLengthCm(m, side) / 100;
+        const grossM2 = lengthM * c.floorHeight;
+
+        if (!neighbor) {
+          let net = grossM2;
+          if (meta.hasWindows && sideLengthCm(m, side) > fmt.w + margin * 2) {
+            net -= windowAreaM2;
+            windowCount++;
+          }
+          extWallArea += Math.max(0, net);
+        } else if (m.id < neighbor.id) {
+          let net = grossM2;
+          if (isDoorableInterior(m.type, neighbor.type)) {
+            net -= doorAreaM2;
+            doorCount++;
+          }
+          intWallArea += Math.max(0, net);
+        }
+      }
+    }
+  }
+
+  return {
+    extWallArea, intWallArea, windowCount, doorCount,
+    groundSlabArea, midSlabArea, roofArea,
+    bgf: footprintArea * c.floors,
+  };
+}
+
+// Heuristische Energieeffizienzklassen-Grenzen (kg CO2e / m² BGF, Bauteil-Herstellung)
+const EFF_CLASSES = [
+  { max: 15,  label: 'A+', color: '#1e8e3e' },
+  { max: 25,  label: 'A',  color: '#34a853' },
+  { max: 35,  label: 'B',  color: '#7cb342' },
+  { max: 50,  label: 'C',  color: '#fbc02d' },
+  { max: 70,  label: 'D',  color: '#f9a825' },
+  { max: 100, label: 'E',  color: '#fb8c00' },
+  { max: 140, label: 'F',  color: '#e64a19' },
+  { max: Infinity, label: 'G', color: '#c62828' },
+];
+
+const fmtNum = (v, dec=1) => v.toLocaleString('de-DE', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+const fmtEur = (v) => Math.round(v).toLocaleString('de-DE') + ' €';
+const fmtKg = (v) => Math.round(v).toLocaleString('de-DE') + ' kg';
+const QTY_KEYS = ['extWall', 'roof', 'groundSlab', 'window', 'midSlab', 'intWall', 'door'];
+const QTY_DEC = { extWall:1, roof:1, groundSlab:1, window:0, midSlab:1, intWall:1, door:0 };
+
+function currentQty() {
+  const c = cfg();
+  const q = computeQuantities(modules, c);
+  return {
+    c, q,
+    map: {
+      extWall: q.extWallArea, roof: q.roofArea, groundSlab: q.groundSlabArea, window: q.windowCount,
+      midSlab: q.midSlabArea, intWall: q.intWallArea, door: q.doorCount,
+    },
+  };
+}
+
+/* --- Mengen & Kosten --- */
+function updateReport() {
+  const { map: qty } = currentQty();
+  for (const key of QTY_KEYS) {
+    document.getElementById('qty-' + key).textContent = QTY_DEC[key] === 0 ? qty[key] : fmtNum(qty[key], QTY_DEC[key]);
+  }
+  const price = (id) => parseFloat(document.getElementById('price-' + id).value) || 0;
+  let totalCost = 0;
+  for (const key of QTY_KEYS) {
+    const cost = qty[key] * price(key);
+    document.getElementById('cost-' + key).textContent = fmtEur(cost);
+    totalCost += cost;
+  }
+  document.getElementById('cost-total').textContent = fmtEur(totalCost);
+  document.getElementById('cost-total2').textContent = fmtEur(totalCost);
+}
+
+/* --- LCA-Analyse (Lebenszyklusbetrachtung nach EN 15978) --- */
+const LCA_STAGES = ['a13', 'a4', 'a5', 'b4', 'c34', 'd'];
+const LCA_ROWS = [
+  { key:'extWall',    label:'Außenwände',    caala:'CAALA_A01', unit:'m²',  group:'Thermische Bauteile',      factors:{a13:45,  a4:2,   a5:1.5, b4:0,  c34:4,  d:-6 } },
+  { key:'roof',       label:'Dach',          caala:'CAALA_A03', unit:'m²',  group:'Thermische Bauteile',      factors:{a13:55,  a4:2.5, a5:2,   b4:8,  c34:5,  d:-7 } },
+  { key:'groundSlab', label:'Bodenplatte',   caala:'CAALA_A11', unit:'m²',  group:'Thermische Bauteile',      factors:{a13:40,  a4:2,   a5:1.5, b4:0,  c34:4,  d:-3 } },
+  { key:'window',     label:'Fenster',       caala:'CAALA_A12', unit:'Stk', group:'Thermische Bauteile',      factors:{a13:120, a4:4,   a5:3,   b4:90, c34:10, d:-8 } },
+  { key:'midSlab',    label:'Decken',        caala:'CAALA_B01', unit:'m²',  group:'Nicht-Thermische Bauteile', factors:{a13:30,  a4:1.5, a5:1,   b4:0,  c34:3,  d:-5 } },
+  { key:'intWall',    label:'Innenwände',    caala:'CAALA_B02', unit:'m²',  group:'Nicht-Thermische Bauteile', factors:{a13:25,  a4:1.5, a5:1,   b4:0,  c34:2.5,d:-4 } },
+  { key:'door',       label:'Türen',         caala:'CAALA_B09', unit:'Stk', group:'Nicht-Thermische Bauteile', factors:{a13:60,  a4:2,   a5:1.5, b4:40, c34:5,  d:-3 } },
+];
+
+function buildLcaRows() {
+  const tbody = document.getElementById('lcaTbody');
+  let html = '';
+  let lastGroup = null;
+  for (const row of LCA_ROWS) {
+    if (row.group !== lastGroup) {
+      html += `<tr class="groupHeader"><td colspan="11">${row.group}</td></tr>`;
+      lastGroup = row.group;
+    }
+    html += `<tr data-row="${row.key}"><td>${row.label}</td><td class="caala">${row.caala}</td>` +
+      `<td class="num" id="lca-qty-${row.key}">0</td><td>${row.unit}</td>`;
+    for (const stage of LCA_STAGES) {
+      html += `<td class="num"><input class="stage" id="lca-${stage}-${row.key}" type="number" step="0.5" value="${row.factors[stage]}"></td>`;
+    }
+    html += `<td class="num" id="lca-total-${row.key}">0</td></tr>`;
+  }
+  tbody.innerHTML = html;
+}
+buildLcaRows();
+
+function computeLCA() {
+  const { q, map: qty } = currentQty();
+  const phaseTotals = { a13:0, a4:0, a5:0, b4:0, c34:0, d:0 };
+  let grandTotalAC = 0, grandTotalNet = 0;
+  for (const row of LCA_ROWS) {
+    const key = row.key;
+    document.getElementById('lca-qty-' + key).textContent = QTY_DEC[key] === 0 ? qty[key] : fmtNum(qty[key], QTY_DEC[key]);
+    let rowTotal = 0;
+    for (const stage of LCA_STAGES) {
+      const factor = parseFloat(document.getElementById('lca-' + stage + '-' + key).value) || 0;
+      const val = qty[key] * factor;
+      phaseTotals[stage] += val;
+      rowTotal += val;
+    }
+    document.getElementById('lca-total-' + key).textContent = Math.round(rowTotal).toLocaleString('de-DE');
+    grandTotalNet += rowTotal;
+    grandTotalAC += rowTotal - qty[key] * (parseFloat(document.getElementById('lca-d-' + key).value) || 0);
+  }
+  return { q, phaseTotals, grandTotalAC, grandTotalNet };
+}
+
+function updateLcaReport() {
+  const { q, phaseTotals, grandTotalAC, grandTotalNet } = computeLCA();
+  document.getElementById('lca-phase-a13').textContent = Math.round(phaseTotals.a13).toLocaleString('de-DE');
+  document.getElementById('lca-phase-a4').textContent = Math.round(phaseTotals.a4).toLocaleString('de-DE');
+  document.getElementById('lca-phase-a5').textContent = Math.round(phaseTotals.a5).toLocaleString('de-DE');
+  document.getElementById('lca-phase-b4').textContent = Math.round(phaseTotals.b4).toLocaleString('de-DE');
+  document.getElementById('lca-phase-c34').textContent = Math.round(phaseTotals.c34).toLocaleString('de-DE');
+  document.getElementById('lca-phase-d').textContent = Math.round(phaseTotals.d).toLocaleString('de-DE');
+  document.getElementById('lca-col-a13').textContent = Math.round(phaseTotals.a13).toLocaleString('de-DE');
+  document.getElementById('lca-col-a4').textContent = Math.round(phaseTotals.a4).toLocaleString('de-DE');
+  document.getElementById('lca-col-a5').textContent = Math.round(phaseTotals.a5).toLocaleString('de-DE');
+  document.getElementById('lca-col-b4').textContent = Math.round(phaseTotals.b4).toLocaleString('de-DE');
+  document.getElementById('lca-col-c34').textContent = Math.round(phaseTotals.c34).toLocaleString('de-DE');
+  document.getElementById('lca-col-d').textContent = Math.round(phaseTotals.d).toLocaleString('de-DE');
+  document.getElementById('lca-col-total').textContent = Math.round(grandTotalNet).toLocaleString('de-DE');
+  document.getElementById('lca-totalAC').textContent = fmtKg(grandTotalAC);
+  document.getElementById('lca-totalNet').textContent = fmtKg(grandTotalNet);
+  const bgf = q.bgf;
+  const perM2 = bgf > 0 ? grandTotalNet / bgf : 0;
+  document.getElementById('lca-totalPerM2a').textContent = fmtNum(perM2, 1) + ' kg CO₂e/m² BGF (gesamter Lebenszyklus)';
+}
+
+/* --- DGNB-Zertifizierung (ENV1.1) --- */
+function updateDgnbReport() {
+  const { q, map: qty } = currentQty();
+  for (const key of QTY_KEYS) {
+    document.getElementById('d-qty-' + key).textContent = QTY_DEC[key] === 0 ? qty[key] : fmtNum(qty[key], QTY_DEC[key]);
+  }
+  const penrtf = (id) => parseFloat(document.getElementById('penrtf-' + id).value) || 0;
+
+  let totalPenrt = 0;
+  for (const key of QTY_KEYS) {
+    const penrt = qty[key] * penrtf(key);
+    document.getElementById('penrt-' + key).textContent = Math.round(penrt).toLocaleString('de-DE');
+    totalPenrt += penrt;
+  }
+  document.getElementById('penrt-total2').textContent = Math.round(totalPenrt).toLocaleString('de-DE') + ' kWh';
+  document.getElementById('dgnb-penrtTotal').textContent = Math.round(totalPenrt).toLocaleString('de-DE') + ' kWh';
+
+  // GWP gesamt kommt aus der LCA-Analyse (gleiche Berechnungsgrundlage, eigener Menüpunkt)
+  const { grandTotalNet } = computeLCA();
+  document.getElementById('dgnb-gwpTotal').textContent = fmtKg(grandTotalNet);
+
+  const nrf = q.bgf; // Näherung: NRF ≈ Footprint × Geschosse
+  const rp = parseFloat(document.getElementById('dgnb-rp').value) || 50;
+  const gwpPerM2a = nrf > 0 ? grandTotalNet / nrf / rp : 0;
+  const penrtPerM2a = nrf > 0 ? totalPenrt / nrf / rp : 0;
+  document.getElementById('dgnb-gwpPerM2a').textContent = fmtNum(gwpPerM2a, 2) + ' kg CO₂e/(m²NRFa)';
+  document.getElementById('dgnb-penrtPerM2a').textContent = fmtNum(penrtPerM2a, 2) + ' kWh/(m²NRFa)';
+  document.getElementById('dgnb-gwpVal').textContent = fmtNum(gwpPerM2a, 2);
+  document.getElementById('dgnb-penrtVal').textContent = fmtNum(penrtPerM2a, 2);
+
+  const klass = EFF_CLASSES.find(k => gwpPerM2a <= k.max);
+  const effEl = document.getElementById('dgnb-effClass');
+  effEl.textContent = klass.label;
+  effEl.style.background = klass.color;
+  document.getElementById('dgnb-effHint').textContent = fmtNum(gwpPerM2a, 2) + ' kg CO₂e/(m²NRFa), heuristisch';
+
+  setBadge('dgnb-gwpBadge', gwpPerM2a, parseFloat(document.getElementById('dgnb-gwpGrenz').value) || Infinity);
+  setBadge('dgnb-penrtBadge', penrtPerM2a, parseFloat(document.getElementById('dgnb-penrtGrenz').value) || Infinity);
+}
+function setBadge(id, value, grenzwert) {
+  const el = document.getElementById(id);
+  const ok = value <= grenzwert;
+  el.textContent = ok ? '✓' : '✗';
+  el.className = 'badge ' + (ok ? 'ok' : 'fail');
+}
+
+function updateAllReports() { updateReport(); updateLcaReport(); updateDgnbReport(); }
+
+function setupModal(overlayId, buttonId, refreshFn) {
+  const overlay = document.getElementById(overlayId);
+  document.getElementById(buttonId).addEventListener('click', () => { refreshFn(); overlay.classList.add('open'); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+  overlay.querySelectorAll('.modalClose').forEach(btn => btn.addEventListener('click', () => overlay.classList.remove('open')));
+  overlay.querySelectorAll('input').forEach(inp => inp.addEventListener('input', refreshFn));
+}
+setupModal('reportOverlay', 't-report', updateReport);
+setupModal('lcaOverlay', 't-lca', updateLcaReport);
+setupModal('dgnbOverlay', 't-dgnb', updateDgnbReport);
+
+/* ============================== LAYOUT GENERATOR ============================== */
+function generateLayout() {
+  if (modules.length && !confirm('Aktuellen Grundriss durch generiertes Layout ersetzen?')) return;
+  const c = cfg();
+  const type = document.getElementById('genType').value; // zweibund | einbund
+  const roomsPerSide = Math.max(1, parseInt(document.getElementById('genCount').value) || 1);
+  const maxRunM = parseFloat(document.getElementById('genMaxRun').value) || 30;
+  const maxRunCm = maxRunM * 100;
+
+  const pitch = c.wohnW;     // entlang Korridor
+  const roomDepth = c.wohnD; // senkrecht zum Korridor
+  const corrW = c.corrW;
+  const kern = c.kernSize;
+  const fullDepth = type === 'zweibund' ? roomDepth * 2 + corrW : roomDepth + corrW;
+
+  const totalLengthEstimate = roomsPerSide * pitch;
+  const needsTwoCores = totalLengthEstimate > maxRunCm;
+
+  // Build sequence of items along corridor axis: {kind:'room'|'core', width}
+  let sequence = [];
+  if (!needsTwoCores) {
+    sequence.push({ kind: 'core', width: kern });
+    for (let i = 0; i < roomsPerSide; i++) sequence.push({ kind: 'room', width: pitch });
+  } else {
+    const g1 = Math.ceil(roomsPerSide / 3);
+    const g2 = Math.ceil(roomsPerSide / 3);
+    const g3 = roomsPerSide - g1 - g2;
+    sequence.push({ kind: 'core', width: kern });
+    for (let i = 0; i < g1; i++) sequence.push({ kind: 'room', width: pitch });
+    sequence.push({ kind: 'core', width: kern });
+    for (let i = 0; i < g2; i++) sequence.push({ kind: 'room', width: pitch });
+    for (let i = 0; i < g3; i++) sequence.push({ kind: 'room', width: pitch });
+  }
+
+  modules = [];
+  nextId = 1;
+  let cursor = 0;
+  const southRoomXs = [];
+  for (const item of sequence) {
+    if (item.kind === 'core') {
+      modules.push(makeModule('kern', cursor, 0, kern, fullDepth));
+    } else {
+      modules.push(makeModule('wohn', cursor, 0, pitch, roomDepth));
+      southRoomXs.push(cursor);
+    }
+    cursor += item.width;
+  }
+  const totalLength = cursor;
+
+  // Corridor strip
+  modules.push(makeModule('flur', 0, roomDepth, totalLength, corrW));
+
+  // Mirrored north band for Zweibund
+  if (type === 'zweibund') {
+    for (const x of southRoomXs) {
+      modules.push(makeModule('wohn', x, roomDepth + corrW, pitch, roomDepth));
+    }
+  }
+
+  // A service room tucked at the far end
+  modules.push(makeModule('service', totalLength, 0, c.serviceW, c.serviceD));
+
+  selectedId = null;
+  rebuildAll(true);
+}
+
+function makeModule(type, x, y, w, d) {
+  return { id: nextId++, type, x: snap(x), y: snap(y), w: snap(w), d: snap(d) };
+}
+
+/* ============================== 2D CANVAS EDITOR ============================== */
+const planEl = document.getElementById('plan2d');
+const canvas = document.getElementById('canvas2d');
+const ctx = canvas.getContext('2d');
+
+let pxPerCm = 0.4;
+let originCm = { x: -200, y: -200 }; // world cm at canvas pixel (0,0), y grows downward on screen
+
+function resizeCanvas() {
+  canvas.width = planEl.clientWidth;
+  canvas.height = planEl.clientHeight;
+  drawPlan();
+}
+new ResizeObserver(resizeCanvas).observe(planEl);
+
+function worldToScreen(xCm, yCm) {
+  return { x: (xCm - originCm.x) * pxPerCm, y: canvas.height - (yCm - originCm.y) * pxPerCm };
+}
+function screenToWorld(px, py) {
+  return { x: px / pxPerCm + originCm.x, y: (canvas.height - py) / pxPerCm + originCm.y };
+}
+
+function fitView() {
+  if (!modules.length) { originCm = { x: -300, y: -300 }; pxPerCm = 0.4; drawPlan(); return; }
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const m of modules) {
+    minX = Math.min(minX, m.x); minY = Math.min(minY, m.y);
+    maxX = Math.max(maxX, m.x + m.w); maxY = Math.max(maxY, m.y + m.d);
+  }
+  const marginCm = 300;
+  minX -= marginCm; minY -= marginCm; maxX += marginCm; maxY += marginCm;
+  const w = maxX - minX, h = maxY - minY;
+  pxPerCm = Math.min(canvas.width / w, canvas.height / h);
+  originCm = { x: minX, y: minY };
+  drawPlan();
+}
+
+function drawGrid() {
+  ctx.save();
+  ctx.strokeStyle = '#eef1f4';
+  ctx.lineWidth = 1;
+  const stepCm = GRID * 8; // visible grid lines every 100cm
+  const startX = Math.floor(originCm.x / stepCm) * stepCm;
+  const endX = originCm.x + canvas.width / pxPerCm;
+  for (let x = startX; x <= endX; x += stepCm) {
+    const p1 = worldToScreen(x, originCm.y);
+    const p2 = worldToScreen(x, originCm.y + canvas.height / pxPerCm);
+    ctx.beginPath(); ctx.moveTo(p1.x, 0); ctx.lineTo(p1.x, canvas.height); ctx.stroke();
+  }
+  const startY = Math.floor(originCm.y / stepCm) * stepCm;
+  const endY = originCm.y + canvas.height / pxPerCm;
+  for (let y = startY; y <= endY; y += stepCm) {
+    const p = worldToScreen(originCm.x, y);
+    ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(canvas.width, p.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawPlan() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
+  for (const m of modules) {
+    const meta = TYPE_META[m.type];
+    const topLeft = worldToScreen(m.x, m.y + m.d);
+    const wPx = m.w * pxPerCm, dPx = m.d * pxPerCm;
+    ctx.fillStyle = meta.color;
+    ctx.strokeStyle = m.id === selectedId ? '#2c7be5' : '#8a93a0';
+    ctx.lineWidth = m.id === selectedId ? 2.5 : 1;
+    ctx.fillRect(topLeft.x, topLeft.y, wPx, dPx);
+    ctx.strokeRect(topLeft.x, topLeft.y, wPx, dPx);
+
+    // exterior facade indicator (thicker dark edge)
+    ctx.strokeStyle = '#4a5563';
+    ctx.lineWidth = 2;
+    if (isExteriorSide(m, 'N', modules)) line(topLeft.x, topLeft.y, topLeft.x + wPx, topLeft.y);
+    if (isExteriorSide(m, 'S', modules)) line(topLeft.x, topLeft.y + dPx, topLeft.x + wPx, topLeft.y + dPx);
+    if (isExteriorSide(m, 'W', modules)) line(topLeft.x, topLeft.y, topLeft.x, topLeft.y + dPx);
+    if (isExteriorSide(m, 'E', modules)) line(topLeft.x + wPx, topLeft.y, topLeft.x + wPx, topLeft.y + dPx);
+
+    if (wPx > 40 && dPx > 18) {
+      ctx.fillStyle = '#33414f';
+      ctx.font = '11px Segoe UI';
+      ctx.fillText(meta.label, topLeft.x + 4, topLeft.y + 14);
+      ctx.font = '10px Segoe UI';
+      ctx.fillStyle = '#5a6472';
+      ctx.fillText(`${(m.w/100).toFixed(2)}×${(m.d/100).toFixed(2)} m`, topLeft.x + 4, topLeft.y + 27);
+    }
+  }
+  function line(x1,y1,x2,y2){ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+}
+
+function hitTest(xCm, yCm) {
+  for (let i = modules.length - 1; i >= 0; i--) {
+    const m = modules[i];
+    if (xCm >= m.x && xCm <= m.x + m.w && yCm >= m.y && yCm <= m.y + m.d) return m;
+  }
+  return null;
+}
+
+/* --- pointer interaction --- */
+let drag = null; // {mode:'module'|'pan', startPx, startCm, orig}
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  const world = screenToWorld(px, py);
+
+  if (currentTool) {
+    const dims = defaultDimsFor(currentTool);
+    const cand = { x: snap(world.x - dims.w/2), y: snap(world.y - dims.d/2), w: dims.w, d: dims.d };
+    const snapped = snapToNeighbors(cand, -1);
+    if (!overlapsAny(snapped, -1)) {
+      modules.push({ id: nextId++, type: currentTool, ...snapped });
+      selectedId = nextId - 1;
+      rebuildAll();
+    }
+    return;
+  }
+
+  const hit = hitTest(world.x, world.y);
+  if (hit) {
+    selectedId = hit.id;
+    drag = { mode: 'module', moduleId: hit.id, offsetX: world.x - hit.x, offsetY: world.y - hit.y, orig: { x: hit.x, y: hit.y } };
+  } else {
+    selectedId = null;
+    drag = { mode: 'pan', startPx: { x: px, y: py }, startOrigin: { ...originCm } };
+  }
+  drawPlan();
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+
+  if (drag.mode === 'pan') {
+    const dx = (px - drag.startPx.x) / pxPerCm;
+    const dy = (py - drag.startPx.y) / pxPerCm;
+    originCm.x = drag.startOrigin.x - dx;
+    originCm.y = drag.startOrigin.y + dy;
+    drawPlan();
+    return;
+  }
+  if (drag.mode === 'module') {
+    const world = screenToWorld(px, py);
+    const m = modules.find(mm => mm.id === drag.moduleId);
+    if (!m) return;
+    const cand = { x: snap(world.x - drag.offsetX), y: snap(world.y - drag.offsetY), w: m.w, d: m.d };
+    const snapped = snapToNeighbors(cand, m.id);
+    if (!overlapsAny(snapped, m.id)) {
+      m.x = snapped.x; m.y = snapped.y;
+      rebuildAll();
+    }
+  }
+});
+
+window.addEventListener('mouseup', () => { drag = null; });
+
+document.getElementById('zoomIn').onclick = () => { pxPerCm *= 1.25; drawPlan(); };
+document.getElementById('zoomOut').onclick = () => { pxPerCm /= 1.25; drawPlan(); };
+document.getElementById('zoomFit').onclick = fitView;
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); }
+  if (e.key === 'Escape') { currentTool = null; refreshToolbar(); }
+  if (e.key.toLowerCase() === 'r') { rotateSelected(); }
+});
+
+/* ============================== TOOLBAR ============================== */
+function refreshToolbar() {
+  document.querySelectorAll('#toolbar .tbtn[data-type]').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === currentTool);
+  });
+  document.getElementById('t-select').classList.toggle('active', !currentTool);
+}
+document.querySelectorAll('#toolbar .tbtn[data-type]').forEach(b => {
+  b.addEventListener('click', () => { currentTool = b.dataset.type; refreshToolbar(); });
+});
+document.getElementById('t-select').addEventListener('click', () => { currentTool = null; refreshToolbar(); });
+document.getElementById('t-rotate').addEventListener('click', rotateSelected);
+document.getElementById('t-delete').addEventListener('click', deleteSelected);
+document.getElementById('t-clear').addEventListener('click', () => {
+  if (!modules.length || confirm('Gesamten Grundriss löschen?')) { modules = []; selectedId = null; rebuildAll(true); }
+});
+document.getElementById('genBtn').addEventListener('click', () => { generateLayout(); fitView(); });
+
+function rotateSelected() {
+  const m = modules.find(mm => mm.id === selectedId);
+  if (!m) return;
+  const cand = { x: m.x, y: m.y, w: m.d, d: m.w };
+  const snapped = snapToNeighbors(cand, m.id);
+  if (!overlapsAny(snapped, m.id)) { m.x = snapped.x; m.y = snapped.y; m.w = snapped.w; m.d = snapped.d; rebuildAll(); }
+}
+function deleteSelected() {
+  if (selectedId == null) return;
+  modules = modules.filter(m => m.id !== selectedId);
+  selectedId = null;
+  rebuildAll();
+}
+refreshToolbar();
+
+/* ============================== TRANSPORT-AMPEL ============================== */
+function updateAmpel() {
+  const c = cfg();
+  const transportWidth = Math.min(c.wohnW, c.wohnD) / 100; // m, schmalere Achse = Transportbreite
+  const light = document.getElementById('ampelLight');
+  const title = document.getElementById('ampelTitle');
+  const sub = document.getElementById('ampelSub');
+  if (transportWidth <= 3.00) {
+    light.style.background = '#2ecc71';
+    title.textContent = 'Genehmigungsfrei';
+    sub.textContent = `Modulbreite ${transportWidth.toFixed(2)} m ≤ 3,00 m – Regelmaß StVZO`;
+  } else if (transportWidth <= 3.50) {
+    light.style.background = '#f1c40f';
+    title.textContent = 'Dauergenehmigung';
+    sub.textContent = `Modulbreite ${transportWidth.toFixed(2)} m ≤ 3,50 m – Allgemeine Erlaubnis möglich`;
+  } else {
+    light.style.background = '#e74c3c';
+    title.textContent = 'Sondertransport';
+    sub.textContent = `Modulbreite ${transportWidth.toFixed(2)} m > 3,50 m – Einzelgenehmigung je Fahrt`;
+  }
+}
+
+/* ============================== FOOTER KPIs ============================== */
+function updateFooter() {
+  const c = cfg();
+  let wohnFlaeche = 0, wohnCount = 0, verkehrFlaeche = 0;
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const m of modules) {
+    const areaM2 = (m.w / 100) * (m.d / 100);
+    if (m.type === 'wohn') { wohnFlaeche += areaM2; wohnCount++; }
+    if (m.type === 'flur' || m.type === 'kern') verkehrFlaeche += areaM2;
+    minX = Math.min(minX, m.x); minY = Math.min(minY, m.y);
+    maxX = Math.max(maxX, m.x + m.w); maxY = Math.max(maxY, m.y + m.d);
+  }
+  const footprint = modules.length ? ((maxX - minX) / 100) * ((maxY - minY) / 100) : 0;
+  const totalFlaeche = wohnFlaeche + verkehrFlaeche;
+  const vfAnteil = totalFlaeche > 0 ? (verkehrFlaeche / totalFlaeche) * 100 : 0;
+  const height = c.floors * c.floorHeight;
+
+  set('kpiWohnflaeche', wohnFlaeche.toFixed(1) + ' m²');
+  set('kpiAvgUnit', (wohnCount ? wohnFlaeche / wohnCount : 0).toFixed(1) + ' m²');
+  set('kpiVerkehr', verkehrFlaeche.toFixed(1) + ' m²');
+  const vfEl = document.getElementById('kpiVfAnteil');
+  vfEl.textContent = vfAnteil.toFixed(1) + ' %';
+  vfEl.className = 'val ' + (vfAnteil > 25 ? 'warn' : 'ok');
+  set('kpiFootprint', footprint.toFixed(1) + ' m²');
+  set('kpiHeight', height.toFixed(2) + ' m');
+  function set(id, txt) { document.getElementById(id).textContent = txt; }
+}
+
+/* ============================== 3D VIEWER ============================== */
+const view3dEl = document.getElementById('view3d');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9edf1);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 3000);
+camera.position.set(25, 22, 30);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+view3dEl.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x44464a, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(40, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+scene.add(sun);
+scene.add(new THREE.GridHelper(120, 96, 0xb0b6bd, 0xd8dce0));
+
+let buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+
+function resize3D() {
+  const w = view3dEl.clientWidth, h = view3dEl.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+new ResizeObserver(resize3D).observe(view3dEl);
+
+const WALL_T = 22; // cm Wandstärke (Holz/Holz-Hybrid)
+const SLAB_T = 24; // cm Deckenstärke
+
+function buildWallWithWindows(lengthCm, heightCm, thicknessCm, openings, colorHex) {
+  const L = lengthCm / 100, H = heightCm / 100, T = thicknessCm / 100;
+  const shape = new THREE.Shape();
+  shape.moveTo(-L/2, 0); shape.lineTo(L/2, 0); shape.lineTo(L/2, H); shape.lineTo(-L/2, H); shape.lineTo(-L/2, 0);
+
+  const group = new THREE.Group();
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.6 });
+  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xbfe3f0, transparent: true, opacity: 0.45, roughness: 0.05, metalness: 0, transmission: 0.6 });
+
+  for (const op of openings) {
+    const ow = op.w / 100, oh = op.h / 100, sill = op.sill / 100;
+    const cx = op.centerCm / 100 - L/2;
+    const hole = new THREE.Path();
+    hole.moveTo(cx - ow/2, sill); hole.lineTo(cx + ow/2, sill);
+    hole.lineTo(cx + ow/2, sill + oh); hole.lineTo(cx - ow/2, sill + oh); hole.lineTo(cx - ow/2, sill);
+    shape.holes.push(hole);
+
+    // Recessed glazing (Laibung): sits centered within wall thickness -> visible reveal on both faces
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(ow * 0.96, oh * 0.96, T * 0.18), glassMat);
+    glass.position.set(cx, sill + oh/2, 0);
+    group.add(glass);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(ow * 0.98, oh * 0.98, T * 0.22), frameMat);
+    frame.position.set(cx, sill + oh/2, 0);
+    const frameGlassCut = glass; // visual frame slightly behind glass plane (kept simple, single combined look)
+    frame.renderOrder = 0;
+    group.add(frame);
+  }
+
+  const wallGeo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: false });
+  wallGeo.translate(0, 0, -T / 2);
+  const wallMesh = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.85 }));
+  wallMesh.castShadow = true; wallMesh.receiveShadow = true;
+  group.add(wallMesh);
+  return group;
+}
+
+function placeWallForSide(parentGroup, m, side, meta, windowFmt) {
+  const T = WALL_T;
+  let length, openings = [];
+  const fmt = WINDOW_FORMATS[windowFmt];
+  const margin = 40; // cm Randabstand für Fenster
+
+  if (side === 'N' || side === 'S') length = m.w; else length = m.d;
+
+  if (meta.hasWindows && length > fmt.w + margin * 2) {
+    openings.push({ w: fmt.w, h: fmt.h, sill: fmt.sill, centerCm: length / 2 });
+  }
+
+  const wallGroup = buildWallWithWindows(length, 0, T, openings, meta.wallHex);
+  // height set later per floor via scale trick is messy; rebuild with correct height directly:
+  return { length, openings };
+}
+
+function rebuild3D(modulesList, c) {
+  buildingGroup.clear();
+  const fmtKey = c.windowFormat;
+  const floorH = c.floorHeight; // m
+
+  for (const m of modulesList) {
+    const meta = TYPE_META[m.type];
+    const cxM = (m.x + m.w / 2) / 100, czM = (m.y + m.d / 2) / 100; // building plan: x->X, y->Z (depth)
+    const wM = m.w / 100, dM = m.d / 100;
+
+    const fmt = WINDOW_FORMATS[fmtKey];
+    const margin = 0.4;
+
+    for (let fl = 0; fl < c.floors; fl++) {
+      const baseY = fl * floorH;
+
+      // Floor slab
+      const slab = new THREE.Mesh(
+        new THREE.BoxGeometry(wM, SLAB_T / 100, dM),
+        new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.9 })
+      );
+      slab.position.set(cxM, baseY, czM);
+      slab.receiveShadow = true; slab.castShadow = true;
+      buildingGroup.add(slab);
+
+      const sides = [
+        { key: 'N', lengthCm: m.w, normalRotY: 0,        posOffset: [0,  m.d/2/100] },
+        { key: 'S', lengthCm: m.w, normalRotY: Math.PI,  posOffset: [0, -m.d/2/100] },
+        { key: 'E', lengthCm: m.d, normalRotY: Math.PI/2,posOffset: [ m.w/2/100, 0] },
+        { key: 'W', lengthCm: m.d, normalRotY: -Math.PI/2,posOffset:[-m.w/2/100, 0] },
+      ];
+
+      for (const s of sides) {
+        if (!isExteriorSide(m, s.key, modulesList)) continue;
+        const lengthM = s.lengthCm / 100;
+        const openings = [];
+        if (meta.hasWindows && lengthM > (fmt.w/100) + margin * 2) {
+          openings.push({ w: fmt.w, h: fmt.h, sill: fmt.sill, centerCm: s.lengthCm / 2 });
+        }
+        const wallGroup = buildWallWithWindows(s.lengthCm, floorH * 100, WALL_T, openings, meta.wallHex);
+        wallGroup.position.set(cxM + s.posOffset[0], baseY + floorH / 2, czM + s.posOffset[1]);
+        wallGroup.rotation.y = s.normalRotY;
+        buildingGroup.add(wallGroup);
+      }
+    }
+  }
+
+  // Flat roof spanning bounding box
+  if (modulesList.length) {
+    let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+    for (const m of modulesList) {
+      minX = Math.min(minX, m.x); minZ = Math.min(minZ, m.y);
+      maxX = Math.max(maxX, m.x + m.w); maxZ = Math.max(maxZ, m.y + m.d);
+    }
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry((maxX-minX)/100 + 0.4, 0.25, (maxZ-minZ)/100 + 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x5c4a3a, roughness: 0.9 })
+    );
+    roof.position.set((minX+maxX)/200, c.floors * floorH + 0.12, (minZ+maxZ)/200);
+    roof.castShadow = true; roof.receiveShadow = true;
+    buildingGroup.add(roof);
+
+    controls.target.set((minX+maxX)/200, c.floors * floorH / 2, (minZ+maxZ)/200);
+  }
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+/* ============================== GLOBAL REBUILD ============================== */
+function rebuildAll(refit) {
+  drawPlan();
+  rebuild3D(modules, cfg());
+  updateAmpel();
+  updateFooter();
+  updateAllReports();
+  if (refit) fitView();
+}
+
+document.getElementById('sidebar').addEventListener('change', () => rebuildAll());
+document.getElementById('sidebar').addEventListener('input', (e) => {
+  if (e.target.tagName === 'SELECT') rebuildAll();
+});
+
+/* ============================== INIT ============================== */
+resizeCanvas();
+resize3D();
+fitView();
+rebuildAll();
+animate();
+</script>
+</body>
+</html>

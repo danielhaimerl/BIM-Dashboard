@@ -14,6 +14,7 @@ State.library = {
   kostengruppen: [],
   materialien:   [],
   stufen:        [],
+  verortung:     [],
 };
 State.activeLibTab = 'preise';
 
@@ -25,9 +26,9 @@ Object.assign(window.rubyBridge, {
   onLibraryLoaded(library) {
     State.library = library;
     renderLibrary();
+    populateKostenstufeSelect();
     if (typeof renderTagEditor === 'function') renderTagEditor();
     if (typeof buildTagFilterSelects === 'function') buildTagFilterSelects();
-    // Kosten neu berechnen sobald Bibliothek geladen
     if (typeof updateCostBanner === 'function') updateCostBanner();
     renderReport();
   },
@@ -69,6 +70,23 @@ function bindLibraryControls() {
 // ---------------------------------------------------------------------------
 // RENDER
 // ---------------------------------------------------------------------------
+function populateKostenstufeSelect() {
+  const sel = document.getElementById('kostenstufeSelect');
+  if (!sel) return;
+  const stufen = (State.library.stufen && State.library.stufen.length)
+    ? State.library.stufen.map(s => s.bezeichnung)
+    : ['01 - Kostenschätzung', '02 - Kostenberechnung Benchmark', '03 - Kostenberechnung Bauteile'];
+  const current = sel.value;
+  sel.innerHTML = stufen.map(s =>
+    `<option value="${escHtml(s)}"${s === current ? ' selected' : ''}>${escHtml(s)}</option>`
+  ).join('');
+  // Falls bisheriger Wert nicht mehr in der Liste: ersten Eintrag wählen und Kosten aktualisieren
+  if (!stufen.includes(current)) {
+    sel.value = stufen[0] || '';
+    sel.dispatchEvent(new Event('change'));
+  }
+}
+
 function renderLibrary() {
   renderLibraryTabs();
   renderLibraryList(State.activeLibTab);
@@ -77,7 +95,7 @@ function renderLibrary() {
 function renderLibraryTabs() {
   const bar = document.getElementById('libTabBar');
   if (!bar) return;
-  const lists = ['preise', 'gewerke', 'kostengruppen', 'materialien'];
+  const lists = ['preise', 'gewerke', 'kostengruppen', 'materialien', 'stufen', 'verortung'];
   bar.innerHTML = lists.map(l => `
     <button class="lib-tab-btn${l === State.activeLibTab ? ' active' : ''}" data-list="${l}">
       ${libLabel(l)}
@@ -215,14 +233,21 @@ function libColumns(listName) {
       ];
     case 'kostengruppen':
       return [
-        { key: 'kg',          label: 'KG-Nr.',      placeholder: '330' },
-        { key: 'bezeichnung', label: 'Bezeichnung', placeholder: 'z.B. Außenwände' },
-        { key: 'einheit',     label: 'Std.-Einheit',type: 'select',
-          options: ['', 'm²', 'm³', 'm', 'Stück'],   default: 'm²' },
+        { key: 'kg', label: 'Kostengruppe', placeholder: '330 Außenwände' },
+        { key: 'einheit', label: 'Std.-Einheit', type: 'select',
+          options: ['', 'm²', 'm³', 'm', 'Stück'], default: 'm²' },
       ];
     case 'materialien':
       return [
         { key: 'bezeichnung', label: 'Bezeichnung', placeholder: 'z.B. Beton' },
+      ];
+    case 'stufen':
+      return [
+        { key: 'bezeichnung', label: 'Kostenstufe', placeholder: 'z.B. 01 - Kostenschätzung' },
+      ];
+    case 'verortung':
+      return [
+        { key: 'bezeichnung', label: 'Verortung', placeholder: 'z.B. BA 1 - EG' },
       ];
     default:
       return [{ key: 'bezeichnung', label: 'Bezeichnung' }];
@@ -230,8 +255,14 @@ function libColumns(listName) {
 }
 
 function libLabel(listName) {
-  return { preise: 'Preise', gewerke: 'Gewerke',
-           kostengruppen: 'Kost.gruppen', materialien: 'Materialien' }[listName] || listName;
+  return {
+    preise:        'Preise',
+    gewerke:       'Gewerk',
+    kostengruppen: 'Kostengruppe',
+    materialien:   'Material',
+    stufen:        'Kostenstufe',
+    verortung:     'Verortung',
+  }[listName] || listName;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,18 +278,20 @@ window.getLibraryOptions = function(tagKey) {
     case 'din276':
       return State.library.kostengruppen.map(k => ({
         value: k.kg,
-        label: `${k.kg} – ${k.bezeichnung}`,
+        label: k.kg,
       }));
     case 'material':
       return State.library.materialien.map(m => ({ value: m.bezeichnung, label: m.bezeichnung }));
     case 'stufe':
-      return State.library.stufen
-        ? State.library.stufen.map(s => ({ value: s.bezeichnung, label: s.beschreibung }))
+      return (State.library.stufen && State.library.stufen.length)
+        ? State.library.stufen.map(s => ({ value: s.bezeichnung, label: s.bezeichnung }))
         : [
-            { value: '1', label: 'Stufe 1 – Kennwerte' },
-            { value: '2', label: 'Stufe 2 – Flächen' },
-            { value: '3', label: 'Stufe 3 – Bauteile' },
+            { value: '01 - Kostenschätzung',           label: '01 - Kostenschätzung' },
+            { value: '02 - Kostenberechnung Benchmark', label: '02 - Kostenberechnung Benchmark' },
+            { value: '03 - Kostenberechnung Bauteile',  label: '03 - Kostenberechnung Bauteile' },
           ];
+    case 'verortung':
+      return (State.library.verortung || []).map(v => ({ value: v.bezeichnung, label: v.bezeichnung }));
     case 'preis_id':
       return State.library.preise.map(p => ({
         value: p.id,

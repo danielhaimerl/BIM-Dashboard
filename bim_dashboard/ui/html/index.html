@@ -32,8 +32,8 @@
     </div>
     <div class="metric-divider"></div>
     <div class="metric-card">
-      <span class="metric-label">Gewerke</span>
-      <span class="metric-value" id="metaGewerke">—</span>
+      <span class="metric-label">Wohnungen</span>
+      <span class="metric-value" id="metaWohnungen">—</span>
     </div>
     <div class="metric-divider"></div>
     <div class="metric-card">
@@ -42,8 +42,16 @@
     </div>
     <div class="metric-divider"></div>
     <div class="metric-card">
-      <span class="metric-label">Gesamtkosten</span>
+      <div class="metric-label-row">
+        <span class="metric-label">Gesamtkosten</span>
+        <select class="stufe-select" id="kostenstufeSelect"></select>
+      </div>
       <span class="metric-value metric-value-cost" id="metaGesamtkosten">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
+      <span class="metric-label">€/Wohnung</span>
+      <span class="metric-value" id="metaEurWohnung">—</span>
     </div>
     <div class="metric-divider"></div>
     <div class="metric-card editable">
@@ -55,22 +63,24 @@
       <input class="metric-input" id="inputKosten" type="text" placeholder="z.B. 2.450.000 €" style="display:none" />
     </div>
     <div class="metric-divider"></div>
-    <div class="metric-card editable">
+    <div class="metric-card">
       <span class="metric-label">BGF m²</span>
-      <div class="metric-value-row">
-        <span class="metric-value" id="metaBGF">—</span>
-        <button class="btn-edit" id="btnEditBGF">✎</button>
-      </div>
-      <input class="metric-input" id="inputBGF" type="text" placeholder="z.B. 1.250" style="display:none" />
+      <span class="metric-value" id="metaBGF">—</span>
     </div>
     <div class="metric-divider"></div>
-    <div class="metric-card editable">
+    <div class="metric-card">
+      <span class="metric-label">€/m² BGF</span>
+      <span class="metric-value" id="metaEurBGF">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
       <span class="metric-label">BRI m³</span>
-      <div class="metric-value-row">
-        <span class="metric-value" id="metaBRI">—</span>
-        <button class="btn-edit" id="btnEditBRI">✎</button>
-      </div>
-      <input class="metric-input" id="inputBRI" type="text" placeholder="z.B. 4.800" style="display:none" />
+      <span class="metric-value" id="metaBRI">—</span>
+    </div>
+    <div class="metric-divider"></div>
+    <div class="metric-card">
+      <span class="metric-label">€/m³ BRI</span>
+      <span class="metric-value" id="metaEurBRI">—</span>
     </div>
     <div class="metric-divider"></div>
     <div class="metric-save" id="metaSaveArea" style="display:none">
@@ -95,6 +105,14 @@
       <button class="nav-item" data-module="library" title="Bibliothek">
         <span class="nav-icon">☰</span>
         <span class="nav-label">Bibliothek</span>
+      </button>
+      <button class="nav-item" data-module="agent" title="KI-Assistent">
+        <span class="nav-icon">✦</span>
+        <span class="nav-label">Assistent</span>
+      </button>
+      <button class="nav-item" data-module="config" title="Konfiguration">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Konfig</span>
       </button>
       <div class="nav-divider"></div>
       <button class="nav-item nav-item-import" id="btnImportExcel" title="Projektstruktur aus Excel importieren">
@@ -154,6 +172,7 @@
         <div class="panel-header">
           <h2>Auswertung</h2>
           <div class="report-controls">
+            <button class="btn btn-sm btn-primary" id="btnExportExcel">↓ Excel</button>
             <button class="btn btn-sm" id="btnExportCSV">↓ CSV</button>
             <button class="btn btn-sm" id="btnExportJSON">↓ JSON</button>
           </div>
@@ -171,6 +190,70 @@
         </div>
         <div id="reportContainer">
           <p class="placeholder">Gruppierung wählen um Auswertung zu starten.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODUL: KI-Assistent -->
+    <div class="module" id="moduleAgent">
+      <div class="panel panel-agent">
+
+        <!-- Header -->
+        <div class="panel-header">
+          <h2>✦ KI-Assistent</h2>
+          <span class="agent-model-label" id="agentModelLabel"></span>
+          <button class="btn btn-sm" id="btnAgentKeyToggle" title="API-Key einstellen">⚙ Key</button>
+          <button class="btn btn-sm" id="btnAgentClear" title="Chat löschen">✕ Leeren</button>
+        </div>
+
+        <!-- API-Key Eingabe (initial sichtbar wenn kein Key) -->
+        <div class="agent-key-bar" id="agentKeyBar">
+          <span class="agent-key-label">Anthropic API-Key:</span>
+          <input class="agent-key-input" id="agentKeyInput" type="password"
+                 placeholder="sk-ant-…" autocomplete="off" />
+          <button class="btn btn-sm btn-primary" id="btnAgentSaveKey">Speichern</button>
+          <a class="agent-key-hint" href="#" onclick="return false"
+             title="console.anthropic.com → Settings → API Keys">Wo finde ich den Key? →</a>
+        </div>
+
+        <!-- Chat-Verlauf -->
+        <div class="agent-messages" id="agentMessages">
+          <div class="agent-welcome">Stelle eine Frage zu deinem Modell.</div>
+        </div>
+
+        <!-- Lade-Indikator -->
+        <div class="agent-loading" id="agentLoading" style="display:none">
+          <span class="agent-dots"><span>.</span><span>.</span><span>.</span></span>
+          KI denkt nach…
+          <button type="button" onclick="cancelAgentRequest()" style="margin-left:12px;padding:2px 10px;font-size:11px;cursor:pointer;">Abbrechen</button>
+        </div>
+
+        <!-- Eingabe -->
+        <form class="agent-input-row" id="agentForm">
+          <textarea class="agent-textarea" id="agentInput" rows="2"
+                    placeholder="z.B. Was kostet der Rohbau in Stufe 2?"
+                    autocomplete="off"></textarea>
+          <button class="btn btn-primary agent-send-btn" id="btnAgentSend" type="submit">
+            ➤
+          </button>
+        </form>
+
+      </div>
+    </div>
+
+    <!-- MODUL: Konfiguration -->
+    <div class="module" id="moduleConfig">
+      <div class="panel panel-config" id="panelConfig">
+        <div class="panel-header">
+          <h2>⚙ Konfiguration</h2>
+          <button class="btn btn-sm btn-primary" id="btnConfigSave">✓ Speichern</button>
+        </div>
+        <div class="lib-hint">
+          Hier wird festgelegt, anhand welcher Bauteilbezeichnung automatische Kennzahlen ermittelt werden
+          (z.B. Anzahl Wohnungen aus den Elementen "Wohnungseingangstür").
+        </div>
+        <div id="configContainer" class="config-container">
+          <p class="placeholder">Lade Konfiguration…</p>
         </div>
       </div>
     </div>
@@ -203,5 +286,7 @@
   <script src="report.js"></script>
   <script src="costs.js"></script>
   <script src="library.js"></script>
+  <script src="config.js"></script>
+  <script src="agent.js"></script>
 </body>
 </html>
