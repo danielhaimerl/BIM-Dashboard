@@ -72,7 +72,7 @@ function renderReport() {
   const totalCost = sumCosts(entities);
 
   container.appendChild(buildTotalHeader(totalCost, entities.length));
-  container.appendChild(buildSection(grouped, activeGroups, 0));
+  container.appendChild(buildSection(grouped, activeGroups, 0, totalCost));
 
   const unclassified = entities.filter(e => !isClassified(e)).length;
   if (unclassified > 0) {
@@ -111,7 +111,7 @@ function buildTotalHeader(total, count) {
 // ---------------------------------------------------------------------------
 // Rekursiver Gruppenaufbau
 // ---------------------------------------------------------------------------
-function buildSection(node, groupKeys, depth) {
+function buildSection(node, groupKeys, depth, parentTotal) {
   const frag = document.createDocumentFragment();
 
   if (node.__items__) {
@@ -127,6 +127,7 @@ function buildSection(node, groupKeys, depth) {
     const count    = items.length;
     const subtotal = sumCosts(items);
     const displayLabel = resolveLabel(catKey, label);
+    const anteil   = parentTotal > 0 ? Math.round(subtotal / parentTotal * 100) : 0;
 
     const section = document.createElement('div');
     section.className = `report-section depth-${depth}`;
@@ -139,6 +140,7 @@ function buildSection(node, groupKeys, depth) {
       <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
+      <span class="pct-bar-wrap header-pct"><span class="pct-bar" style="width:${anteil * 0.6}%"></span><span>${anteil} %</span></span>
       <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
       <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
       <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
@@ -166,10 +168,7 @@ function buildSection(node, groupKeys, depth) {
     });
 
     const sub = skipSameKg(children, depth + 1, label);
-    if (!sub.node.__items__ && groupKeys[sub.depth]) {
-      body.appendChild(buildSummaryTable(sub.node, groupKeys[sub.depth], subtotal));
-    }
-    body.appendChild(buildSection(sub.node, groupKeys, sub.depth));
+    body.appendChild(buildSection(sub.node, groupKeys, sub.depth, subtotal));
 
     section.appendChild(hdr);
     section.appendChild(body);
@@ -177,65 +176,6 @@ function buildSection(node, groupKeys, depth) {
   });
 
   return frag;
-}
-
-// ---------------------------------------------------------------------------
-// Zusammenfassungstabelle
-// ---------------------------------------------------------------------------
-function buildSummaryTable(node, nextCatKey, parentTotal) {
-  if (node.__items__) return document.createDocumentFragment();
-  const catLabel = groupLabel(nextCatKey);
-  const wrap = document.createElement('div');
-  wrap.className = 'report-summary';
-  const tbl = document.createElement('table');
-  tbl.className = 'report-summary-table';
-  tbl.innerHTML = `
-    <colgroup>
-      <col style="width:auto">
-      <col style="width:60px">
-      <col style="width:120px">
-      <col style="width:130px">
-    </colgroup>
-    <thead><tr>
-      <th>${escHtml(catLabel)}</th>
-      <th class="num">Anzahl</th>
-      <th class="num">Anteil</th>
-      <th class="num">Gesamtbetrag</th>
-    </tr></thead>`;
-  const tbody    = document.createElement('tbody');
-  const allItems    = collectItems(node);
-  const totalCosts  = sumCosts(allItems);
-  Object.entries(node).forEach(([subLabel, subChildren]) => {
-    const items  = collectItems(subChildren);
-    const n      = items.length;
-    const cost   = sumCosts(items);
-    const anteil = totalCosts > 0 ? Math.round(cost / totalCosts * 100) : 0;
-    const displaySub = resolveLabel(nextCatKey, subLabel);
-    const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
-    tr.innerHTML = `
-      <td>${escHtml(displaySub)}</td>
-      <td class="num">${n}</td>
-      <td class="num">
-        <div class="pct-bar-wrap">
-          <div class="pct-bar" style="width:${anteil * 0.6}%"></div>
-          <span>${anteil} %</span>
-        </div>
-      </td>
-      <td class="num">${cost > 0 ? fmtEur(cost) : '<span class="dim">—</span>'}</td>
-    `;
-    tr.addEventListener('click', () => {
-      State.selectedIds = new Set(items.map(i => String(i.id)));
-      syncSelectionToSketchUp();
-      updateSelectionBar();
-      renderEntityList();
-      showToast(`${n} Bauteil${n !== 1 ? 'e' : ''} selektiert`);
-    });
-    tbody.appendChild(tr);
-  });
-  tbl.appendChild(tbody);
-  wrap.appendChild(tbl);
-  return wrap;
 }
 
 // ---------------------------------------------------------------------------

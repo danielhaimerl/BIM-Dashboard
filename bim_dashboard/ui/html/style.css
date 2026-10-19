@@ -1572,3 +1572,9 @@ body {
   color: var(--text-hint);
   font-size: 10px;
 }
+
+/* Prozentbalken in den Gruppen-Kopfzeilen (Anteil an der übergeordneten Gruppe) */
+.report-section-header .header-pct { width: 130px; min-width: 130px; }
+.report-section-header .header-pct .pct-bar  { background: rgba(255,255,255,0.8); }
+.report-section-header .header-pct span      { color: inherit; opacity: .85; font-weight: 400; }
+.report-section.depth-2 .report-section-header .header-pct .pct-bar { background: var(--accent-mid); }
