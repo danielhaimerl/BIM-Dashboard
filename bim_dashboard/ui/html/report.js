@@ -9,7 +9,7 @@
 // Fallback: für alte Daten die nur die Nummer haben, Bibliothek durchsuchen
 function resolveLabel(catKey, rawVal) {
   if (!rawVal || rawVal === '—') return rawVal;
-  if (catKey === 'din276') {
+  if (catKey.startsWith('din276')) {
     const lib = State.library || {};
     const kg = (lib.kostengruppen || []).find(k => k.kg === rawVal);
     if (kg) return kg.kg; // enthält bereits den vollen Text
@@ -102,7 +102,7 @@ function buildSection(node, groupKeys, depth) {
   }
 
   const catKey   = groupKeys[depth];
-  const catLabel = State.categories[catKey] || catKey;
+  const catLabel = groupLabel(catKey);
 
   Object.entries(node).forEach(([label, children]) => {
     const items    = collectItems(children);
@@ -164,7 +164,7 @@ function buildSection(node, groupKeys, depth) {
 // ---------------------------------------------------------------------------
 function buildSummaryTable(node, nextCatKey, parentTotal) {
   if (node.__items__) return document.createDocumentFragment();
-  const catLabel = State.categories[nextCatKey] || nextCatKey;
+  const catLabel = groupLabel(nextCatKey);
   const wrap = document.createElement('div');
   wrap.className = 'report-summary';
   const tbl = document.createElement('table');
@@ -829,7 +829,7 @@ function collectExportSections(node, groupKeys, depth, rows) {
     return;
   }
   const catKey   = groupKeys[depth];
-  const catLabel = (State.categories && State.categories[catKey]) || catKey;
+  const catLabel = groupLabel(catKey);
 
   Object.entries(node).forEach(([label, children]) => {
     const items        = collectItems(children);
