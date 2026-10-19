@@ -50,6 +50,7 @@ function renderReport() {
   const activeGroups = State.groupBy.filter(Boolean);
 
   buildReportFilterSelects();
+  buildOutlineButtons(activeGroups.length);
 
   if (!activeGroups.length) {
     container.innerHTML = '<p class="placeholder">Gruppierung wählen um Auswertung zu starten.</p>';
@@ -73,6 +74,7 @@ function renderReport() {
 
   container.appendChild(buildTotalHeader(totalCost, entities.length));
   container.appendChild(buildSection(grouped, activeGroups, 0, totalCost));
+  applyOutlineLevel();
 
   const unclassified = entities.filter(e => !isClassified(e)).length;
   if (unclassified > 0) {
@@ -82,6 +84,43 @@ function renderReport() {
       ${unclassified} Bauteil${unclassified !== 1 ? 'e' : ''} noch nicht klassifiziert`;
     container.appendChild(hint);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Ebenen-Buttons 1, 2, 3 … (wie Gliederung in Excel)
+// Stufe n zeigt die Gruppen bis Ebene n; die letzte Stufe zeigt auch die Bauteile.
+// ---------------------------------------------------------------------------
+function buildOutlineButtons(groupCount) {
+  const wrap = document.getElementById('outlineButtons');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!groupCount) return;
+  if (State.outlineLevel > groupCount + 1) State.outlineLevel = null;
+  for (let n = 1; n <= groupCount + 1; n++) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm outline-btn';
+    btn.textContent = n;
+    btn.title = n <= groupCount ? `Bis Ebene ${n} anzeigen` : 'Alles mit Bauteilen anzeigen';
+    if (n === (State.outlineLevel || groupCount + 1)) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      State.outlineLevel = n;
+      wrap.querySelectorAll('.outline-btn').forEach(b => b.classList.toggle('active', b === btn));
+      applyOutlineLevel();
+    });
+    wrap.appendChild(btn);
+  }
+}
+
+function applyOutlineLevel() {
+  const level = State.outlineLevel;
+  if (!level) return; // Standard: alles aufgeklappt
+  document.querySelectorAll('#reportContainer .report-section').forEach(sec => {
+    const open   = Number(sec.dataset.depth) < level - 1;
+    const body   = sec.querySelector(':scope > .report-section-body');
+    const toggle = sec.querySelector(':scope > .report-section-header .report-toggle');
+    if (body)   body.style.display = open ? '' : 'none';
+    if (toggle) toggle.textContent = open ? '▾' : '▸';
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +170,7 @@ function buildSection(node, groupKeys, depth, parentTotal) {
 
     const section = document.createElement('div');
     section.className = `report-section depth-${depth}`;
+    section.dataset.depth = depth;
 
     const hdr = document.createElement('div');
     hdr.className = 'report-section-header';

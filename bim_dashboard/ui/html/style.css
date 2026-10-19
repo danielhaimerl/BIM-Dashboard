@@ -338,6 +338,9 @@ body {
   outline: none;
 }
 .group-controls select:focus { border-color: var(--accent); }
+.outline-buttons { display: flex; gap: 3px; flex-shrink: 0; }
+.outline-btn { min-width: 24px; padding: 2px 6px; }
+.outline-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* --- Entity List --- */
 .list-container { flex: 1; overflow-y: auto; }
