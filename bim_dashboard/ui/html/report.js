@@ -522,11 +522,23 @@ function buildDetailTable(items) {
 // ---------------------------------------------------------------------------
 // Filter-Logik
 // ---------------------------------------------------------------------------
+// Kostenstufen im Modell (sortiert) – der Regler zeigt immer genau eine davon
+function getReportStufen() {
+  return [...new Set(State.entities.map(e => (e.tags && e.tags.stufe) || '').filter(Boolean))].sort();
+}
+
+function getReportStufe() {
+  const stufen = getReportStufen();
+  if (!stufen.includes(State.reportStufe)) State.reportStufe = stufen[0] || '';
+  return State.reportStufe;
+}
+
 function getReportFilteredEntities() {
-  if (!State.reportFilters) return State.entities;
+  const stufe = getReportStufe();
   return State.entities.filter(e => {
-    for (const [cat, excluded] of Object.entries(State.reportFilters)) {
-      if (!excluded || !excluded.size) continue;
+    if (stufe && ((e.tags && e.tags.stufe) || '') !== stufe) return false;
+    for (const [cat, excluded] of Object.entries(State.reportFilters || {})) {
+      if (cat === 'stufe' || !excluded || !excluded.size) continue;
       const val = (e.tags && e.tags[cat]) || '—';
       if (excluded.has(val)) return false;
     }
@@ -541,6 +553,7 @@ function buildReportFilterSelects() {
   container.innerHTML = '';
 
   Object.entries(State.categories || {}).forEach(([cat, label]) => {
+    if (cat === 'stufe') { buildReportStufeSlider(container, label); return; }
     const allVals = [...new Set(State.entities.map(e => (e.tags && e.tags[cat]) || '—'))].sort();
     if (allVals.length <= 1) return;
 
@@ -631,6 +644,42 @@ function buildReportFilterSelects() {
   };
 
   updateClearFilterBtn();
+}
+
+// Kostenstufe: Regler statt Mehrfach-Filter (immer genau eine Stufe sichtbar)
+function buildReportStufeSlider(container, label) {
+  const stufen = getReportStufen();
+  if (!stufen.length) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-stufe-slider';
+
+  const lbl = document.createElement('span');
+  lbl.className   = 'report-stufe-label';
+  lbl.textContent = label + ':';
+
+  const range = document.createElement('input');
+  range.type  = 'range';
+  range.min   = 0;
+  range.max   = stufen.length - 1;
+  range.step  = 1;
+  range.value = stufen.indexOf(getReportStufe());
+  range.disabled = stufen.length === 1;
+
+  const val = document.createElement('span');
+  val.className   = 'report-stufe-value';
+  val.textContent = State.reportStufe;
+
+  range.addEventListener('input', () => {
+    State.reportStufe = stufen[range.value];
+    val.textContent   = State.reportStufe;
+  });
+  range.addEventListener('change', () => renderReport());
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(range);
+  wrap.appendChild(val);
+  container.appendChild(wrap);
 }
 
 function updateClearFilterBtn() {

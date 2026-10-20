@@ -1341,6 +1341,18 @@ body {
   color: var(--success);
 }
 
+/* --- Auswertung: Kostenstufen-Regler --- */
+.report-stufe-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-size: 11px;
+}
+.report-stufe-slider input[type=range] { width: 90px; accent-color: var(--accent); cursor: pointer; }
+.report-stufe-label { color: var(--text-dim); }
+.report-stufe-value { font-weight: 500; color: var(--text); white-space: nowrap; }
+
 /* --- Gesamtkosten: Stufen-Select --- */
 .metric-label-row {
   display: flex;
