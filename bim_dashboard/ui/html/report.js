@@ -552,8 +552,11 @@ function buildReportFilterSelects() {
   if (!container) return;
   container.innerHTML = '';
 
+  // Kostenstufe immer ganz links
+  if (State.categories && State.categories.stufe) buildReportStufeSelect(container, State.categories.stufe);
+
   Object.entries(State.categories || {}).forEach(([cat, label]) => {
-    if (cat === 'stufe') { buildReportStufeSelect(container, label); return; }
+    if (cat === 'stufe') return;
     const allVals = [...new Set(State.entities.map(e => (e.tags && e.tags[cat]) || '—'))].sort();
     if (allVals.length <= 1) return;
 
@@ -646,7 +649,7 @@ function buildReportFilterSelects() {
   updateClearFilterBtn();
 }
 
-// Kostenstufe: alle Stufen als Text, die gewählte hervorgehoben, die übrigen ausgegraut
+// Kostenstufe: Segment-Schalter, immer genau eine Stufe aktiv
 function buildReportStufeSelect(container, label) {
   const stufen = getReportStufen();
   if (!stufen.length) return;
@@ -660,15 +663,19 @@ function buildReportStufeSelect(container, label) {
   lbl.textContent = label + ':';
   wrap.appendChild(lbl);
 
+  const seg = document.createElement('span');
+  seg.className = 'report-stufe-seg';
+  wrap.appendChild(seg);
+
   stufen.forEach(stufe => {
-    const opt = document.createElement('span');
+    const opt = document.createElement('button');
     opt.className   = `report-stufe-option${stufe === current ? ' active' : ''}`;
     opt.textContent = stufe;
     opt.addEventListener('click', () => {
       State.reportStufe = stufe;
       renderReport();
     });
-    wrap.appendChild(opt);
+    seg.appendChild(opt);
   });
 
   container.appendChild(wrap);

@@ -1345,14 +1345,31 @@ body {
 .report-stufe-select {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   margin-right: 12px;
   font-size: 11px;
 }
 .report-stufe-label { color: var(--text-dim); }
-.report-stufe-option { color: var(--text-dim); opacity: 0.5; cursor: pointer; white-space: nowrap; }
-.report-stufe-option:hover { opacity: 0.8; }
-.report-stufe-option.active { color: var(--accent); opacity: 1; font-weight: 600; cursor: default; }
+.report-stufe-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-med);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.report-stufe-option {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font);
+  color: var(--text-dim);
+  background: var(--bg);
+  border: none;
+  border-right: 1px solid var(--border-med);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.report-stufe-option:last-child { border-right: none; }
+.report-stufe-option:hover { background: var(--accent-bg); color: var(--text); }
+.report-stufe-option.active { background: var(--accent); color: #fff; cursor: default; }
 
 /* --- Gesamtkosten: Stufen-Select --- */
 .metric-label-row {
