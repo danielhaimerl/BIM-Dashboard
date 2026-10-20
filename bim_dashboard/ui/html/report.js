@@ -756,6 +756,98 @@ function fmtNum(v) {
 }
 
 // ---------------------------------------------------------------------------
+// Gruppierung in die Gliederung (Outliner) des Modells schreiben
+// Jedes Bauteil bekommt den Pfad seiner Gruppen, wie in der Auswertung angezeigt.
+// ---------------------------------------------------------------------------
+function writeOutliner() {
+  const activeGroups = (State.groupBy || []).filter(Boolean);
+  if (!activeGroups.length) { showToast('Zuerst eine Gruppierung wählen', 'error'); return; }
+  const rows = [];
+  collectOutlinerPaths(groupEntities(getReportFilteredEntities(), activeGroups), activeGroups, 0, [], rows);
+  if (!rows.length) { showToast('Keine Bauteile in der Auswertung', 'error'); return; }
+  ruby('writeOutliner', rows);
+}
+
+function collectOutlinerPaths(node, groupKeys, depth, path, rows) {
+  if (node.__items__) {
+    node.__items__.forEach(e => rows.push({ id: e.id, path }));
+    return;
+  }
+  const catKey = groupKeys[depth];
+  Object.entries(node).forEach(([label, children]) => {
+    const name = label === '—' ? `ohne ${groupLabel(catKey)}` : resolveLabel(catKey, label);
+    const sub  = skipSameKg(children, depth + 1, label);
+    collectOutlinerPaths(sub.node, groupKeys, sub.depth, path.concat(name), rows);
+  });
+}
+
+window.rubyBridge.onOutlinerWritten = function({ moved, skipped }) {
+  showToast(`✓ ${moved} Bauteil${moved !== 1 ? 'e' : ''} in Gliederung geschrieben` +
+            (skipped ? ` (${skipped} übersprungen)` : ''));
+  ruby('refreshModel');
+};
+
+// ---------------------------------------------------------------------------
+// Modell nach Gruppierung einfärben
+// Oberste Ebene: über den ganzen Farbkreis verteilt. Jede weitere Ebene teilt den
+// Farbbereich ihrer Elterngruppe weiter auf. Unterste Ebene: gleicher Farbton,
+// nur unterschiedliche Helligkeit.
+// ---------------------------------------------------------------------------
+function colorizeModel() {
+  const activeGroups = (State.groupBy || []).filter(Boolean);
+  if (!activeGroups.length) { showToast('Zuerst eine Gruppierung wählen', 'error'); return; }
+  const colors = [];
+  collectColors(groupEntities(getReportFilteredEntities(), activeGroups), activeGroups, 0, 0, 360, [], colors);
+  if (!colors.length) { showToast('Keine Bauteile in der Auswertung', 'error'); return; }
+  ruby('colorizeModel', colors);
+}
+
+function collectColors(node, groupKeys, depth, hue, span, path, colors) {
+  const catKey  = groupKeys[depth];
+  const entries = Object.entries(node);
+  const n       = entries.length;
+  entries.forEach(([label, children], i) => {
+    const name = label === '—' ? `ohne ${groupLabel(catKey)}` : resolveLabel(catKey, label);
+    const sub  = skipSameKg(children, depth + 1, label);
+    if (sub.node.__items__ && depth > 0) {
+      // Unterste Ebene: leicht verschobener Farbton aus dem Bereich der Elterngruppe,
+      // Helligkeit 25–80 %, abwechselnd hell/dunkel damit Nachbarn sich gut abheben
+      const h = hue - span / 2 + span * (i + 0.5) / n;
+      const rank  = i % 2 === 0 ? i / 2 : n - 1 - (i - 1) / 2;
+      const light = n > 1 ? 25 + 55 * rank / (n - 1) : 50;
+      colors.push({ name: 'BIM ' + path.concat(name).join(' › '), rgb: hslToRgb(h, 70, light),
+                    ids: sub.node.__items__.map(e => e.id) });
+      return;
+    }
+    // Farbbereich aufteilen; kleiner Abstand zwischen Geschwistern (Faktor 0,9)
+    const h = depth === 0 ? i * 360 / n : hue - span / 2 + span * (i + 0.5) / n;
+    const s = depth === 0 ? 360 / n * 0.9 : span / n * 0.9;
+    if (sub.node.__items__) {
+      colors.push({ name: 'BIM ' + name, rgb: hslToRgb(h, 70, 50), ids: sub.node.__items__.map(e => e.id) });
+    } else {
+      collectColors(sub.node, groupKeys, sub.depth, h, s, path.concat(name), colors);
+    }
+  });
+}
+
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [f(0), f(8), f(4)].map(v => Math.round(v * 255));
+}
+
+window.rubyBridge.onModelColorized = function({ count }) {
+  showToast(`✓ ${count} Bauteil${count !== 1 ? 'e' : ''} eingefärbt`);
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btnWriteOutliner')?.addEventListener('click', writeOutliner);
+  document.getElementById('btnColorize')?.addEventListener('click', colorizeModel);
+});
+
+// ---------------------------------------------------------------------------
 // Excel-Export
 // ---------------------------------------------------------------------------
 

@@ -10,7 +10,7 @@ module BimDashboard
 
     DIALOG_OPTS = {
       dialog_title:    'BIM Dashboard',
-      preferences_key: 'bim_dashboard_v71',
+      preferences_key: 'bim_dashboard_v74',
       resizable:       true,
       width:           1200,
       height:          750,
@@ -205,6 +205,7 @@ module BimDashboard
         ids   = payload ? JSON.parse(payload) : nil
         model = Sketchup.active_model
 
+        TagManager.make_copies_unique
         all_tuples = TagManager.collect_all_entities
         items = if ids && ids.any?
           id_set = ids.map(&:to_i).to_set
@@ -371,6 +372,36 @@ module BimDashboard
           end
         rescue => e
           call_js('onError', { message: "Excel-Export fehlgeschlagen: #{e.message}\n#{e.backtrace.first(3).join("\n")}" })
+        end
+      end
+
+      @dialog.add_action_callback('writeOutliner') do |_ctx, payload|
+        begin
+          rows = JSON.parse(payload)
+          msg = "#{rows.length} Bauteile werden in Gruppen nach der aktuellen Gruppierung verschoben.\n" \
+                "Die bisherige Gruppenstruktur dieser Bauteile wird dabei aufgelöst.\n" \
+                "Rückgängig mit Strg+Z.\n\nFortfahren?"
+          if UI.messagebox(msg, MB_YESNO) == IDYES
+            result = Outliner.write(rows)
+            call_js('onOutlinerWritten', result)
+          end
+        rescue => e
+          call_js('onError', { message: "Gliederung schreiben fehlgeschlagen: #{e.message}" })
+        end
+      end
+
+      @dialog.add_action_callback('colorizeModel') do |_ctx, payload|
+        begin
+          colors = JSON.parse(payload)
+          n = colors.sum { |c| c['ids'].length }
+          msg = "#{n} Bauteile werden nach der aktuellen Gruppierung eingefärbt.\n" \
+                "Ihr bisheriges Material und alle Flächenfarben darin werden dabei ersetzt.\n" \
+                "Rückgängig mit Strg+Z.\n\nFortfahren?"
+          if UI.messagebox(msg, MB_YESNO) == IDYES
+            call_js('onModelColorized', { count: Outliner.colorize(colors) })
+          end
+        rescue => e
+          call_js('onError', { message: "Einfärben fehlgeschlagen: #{e.message}" })
         end
       end
 
@@ -749,6 +780,7 @@ module BimDashboard
 
     # Berechnet Mengen für alle klassifizierten Entities (lautlos im Hintergrund)
     def self.auto_calculate_quantities
+      TagManager.make_copies_unique
       tuples = TagManager.collect_all_entities.select do |e, _p, _t|
         d = e.attribute_dictionary(DICT_NAME)
         d && !d.to_h.empty?
