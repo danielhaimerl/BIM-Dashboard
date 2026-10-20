@@ -205,6 +205,7 @@ module BimDashboard
         ids   = payload ? JSON.parse(payload) : nil
         model = Sketchup.active_model
 
+        TagManager.make_copies_unique
         all_tuples = TagManager.collect_all_entities
         items = if ids && ids.any?
           id_set = ids.map(&:to_i).to_set
@@ -779,6 +780,7 @@ module BimDashboard
 
     # Berechnet Mengen für alle klassifizierten Entities (lautlos im Hintergrund)
     def self.auto_calculate_quantities
+      TagManager.make_copies_unique
       tuples = TagManager.collect_all_entities.select do |e, _p, _t|
         d = e.attribute_dictionary(DICT_NAME)
         d && !d.to_h.empty?

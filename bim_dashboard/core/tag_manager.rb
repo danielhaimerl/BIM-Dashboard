@@ -81,6 +81,34 @@ module BimDashboard
         .sort
     end
 
+    # Kopierte Gruppen teilen sich ihren Inhalt: Ein Bauteil darin ist dann nur ein
+    # Objekt mit einer gespeicherten Menge, obwohl die Kopien unterschiedlich skaliert
+    # sein können. Ordner-Gruppen (mit Unterelementen) werden deshalb eindeutig gemacht,
+    # wie "Eindeutig machen" in SketchUp. Bauteil-Gruppen selbst sind nicht betroffen.
+    def self.make_copies_unique(model = Sketchup.active_model)
+      return unless shared_folder?(model.entities)
+      model.start_operation('BIM kopierte Gruppen eindeutig machen', true)
+      make_unique_recursive(model.entities)
+      model.commit_operation
+    end
+
+    def self.shared_folder?(entities)
+      entities.grep(Sketchup::Group).any? do |g|
+        (folder_group?(g) && g.definition.instances.length > 1) || shared_folder?(g.entities)
+      end
+    end
+
+    def self.make_unique_recursive(entities)
+      entities.grep(Sketchup::Group).each do |g|
+        g.make_unique if folder_group?(g) && g.definition.instances.length > 1
+        make_unique_recursive(g.entities)
+      end
+    end
+
+    def self.folder_group?(group)
+      group.entities.any? { |c| c.is_a?(Sketchup::Group) || c.is_a?(Sketchup::ComponentInstance) }
+    end
+
     private
 
     # Traversiert rekursiv und akkumuliert die Welt-Transformation über alle Eltern.
