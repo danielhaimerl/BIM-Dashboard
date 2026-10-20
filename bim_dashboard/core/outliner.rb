@@ -14,31 +14,34 @@ module BimDashboard
 
     # rows: [{ 'id' => entityID, 'path' => ['300 …', '330 …', '331 …'] }, …]
     # Rückgabe: { moved:, skipped: }
+    #
+    # Kopierte Gruppen teilen sich ihren Inhalt: Ein Bauteil darin ist dieselbe Entity,
+    # kommt im Modell aber mehrfach vor. Deshalb wird jedes Vorkommen einzeln an seiner
+    # Lage neu erzeugt und das Original erst danach einmal gelöscht.
     def self.write(rows)
       model = Sketchup.active_model
       Isolate.disable if Isolate.active?
 
-      # entityID → Welt-Transformation (berücksichtigt alle übergeordneten Gruppen)
-      world = {}
-      TagManager.collect_all_entities(model).each { |e, _path, t| world[e.entityID] = [e, t] }
+      paths = {}
+      rows.each { |r| paths[r['id'].to_i] = r['path'] }
+      # [entity, path, welt_transformation] je Vorkommen im Modell
+      occurrences = TagManager.collect_all_entities(model).select { |e, _p, _t| paths.key?(e.entityID) }
 
       moved = 0
       skipped = 0
-      old_parents = []
+      originals = []
 
       model.start_operation('Gruppierung in Gliederung schreiben', true)
       begin
-        rows.each do |row|
-          e, t = world[row['id'].to_i]
-          unless e && e.valid? && (e.is_a?(Sketchup::Group) || e.is_a?(Sketchup::ComponentInstance)) && !e.locked?
+        occurrences.each do |e, _p, t|
+          unless (e.is_a?(Sketchup::Group) || e.is_a?(Sketchup::ComponentInstance)) && !e.locked?
             skipped += 1
             next
           end
 
-          target = target_group(model, row['path'])
+          target = target_group(model, paths[e.entityID])
           next if e.parent == target.definition  # liegt schon richtig
 
-          old_parents << e.parent
           copy = target.entities.add_instance(e.definition, t)
           copy.name     = e.name
           copy.layer    = e.layer
@@ -47,11 +50,14 @@ module BimDashboard
           (e.attribute_dictionaries || []).each do |dict|
             dict.each_pair { |k, v| copy.set_attribute(dict.name, k, v) }
           end
-          e.erase!
+          originals << e
           moved += 1
         end
 
-        remove_empty_groups(old_parents.uniq)
+        originals.uniq!
+        old_parents = originals.map(&:parent).uniq
+        originals.each { |e| e.erase! if e.valid? }
+        remove_empty_groups(old_parents)
         model.commit_operation
       rescue => err
         model.abort_operation
@@ -125,15 +131,17 @@ module BimDashboard
       group.entities.any? { |c| c.is_a?(Sketchup::Group) || c.is_a?(Sketchup::ComponentInstance) }
     end
 
-    # Entfernt Gruppen, die durch das Umhängen leer geworden sind (auch übergeordnete)
+    # Entfernt Gruppen, die durch das Umhängen leer geworden sind (auch übergeordnete,
+    # und alle Kopien einer leeren Gruppe)
     def self.remove_empty_groups(parents)
-      parents.each do |parent|
-        while parent.is_a?(Sketchup::ComponentDefinition) && parent.valid? && parent.group? &&
-              parent.entities.length == 0 && parent.instances.any?
-          inst = parent.instances.first
-          up = inst.parent
+      queue = parents.dup
+      until queue.empty?
+        parent = queue.shift
+        next unless parent.is_a?(Sketchup::ComponentDefinition) && parent.valid? && parent.group? &&
+                    parent.entities.length == 0
+        parent.instances.dup.each do |inst|
+          queue << inst.parent
           inst.erase!
-          parent = up
         end
       end
     end
