@@ -522,7 +522,7 @@ function buildDetailTable(items) {
 // ---------------------------------------------------------------------------
 // Filter-Logik
 // ---------------------------------------------------------------------------
-// Kostenstufen im Modell (sortiert) – der Regler zeigt immer genau eine davon
+// Kostenstufen im Modell (sortiert) – die Auswertung zeigt immer genau eine davon
 function getReportStufen() {
   return [...new Set(State.entities.map(e => (e.tags && e.tags.stufe) || '').filter(Boolean))].sort();
 }
@@ -553,7 +553,7 @@ function buildReportFilterSelects() {
   container.innerHTML = '';
 
   Object.entries(State.categories || {}).forEach(([cat, label]) => {
-    if (cat === 'stufe') { buildReportStufeSlider(container, label); return; }
+    if (cat === 'stufe') { buildReportStufeSelect(container, label); return; }
     const allVals = [...new Set(State.entities.map(e => (e.tags && e.tags[cat]) || '—'))].sort();
     if (allVals.length <= 1) return;
 
@@ -646,39 +646,31 @@ function buildReportFilterSelects() {
   updateClearFilterBtn();
 }
 
-// Kostenstufe: Regler statt Mehrfach-Filter (immer genau eine Stufe sichtbar)
-function buildReportStufeSlider(container, label) {
+// Kostenstufe: alle Stufen als Text, die gewählte hervorgehoben, die übrigen ausgegraut
+function buildReportStufeSelect(container, label) {
   const stufen = getReportStufen();
   if (!stufen.length) return;
+  const current = getReportStufe();
 
   const wrap = document.createElement('div');
-  wrap.className = 'report-stufe-slider';
+  wrap.className = 'report-stufe-select';
 
   const lbl = document.createElement('span');
   lbl.className   = 'report-stufe-label';
   lbl.textContent = label + ':';
-
-  const range = document.createElement('input');
-  range.type  = 'range';
-  range.min   = 0;
-  range.max   = stufen.length - 1;
-  range.step  = 1;
-  range.value = stufen.indexOf(getReportStufe());
-  range.disabled = stufen.length === 1;
-
-  const val = document.createElement('span');
-  val.className   = 'report-stufe-value';
-  val.textContent = State.reportStufe;
-
-  range.addEventListener('input', () => {
-    State.reportStufe = stufen[range.value];
-    val.textContent   = State.reportStufe;
-  });
-  range.addEventListener('change', () => renderReport());
-
   wrap.appendChild(lbl);
-  wrap.appendChild(range);
-  wrap.appendChild(val);
+
+  stufen.forEach(stufe => {
+    const opt = document.createElement('span');
+    opt.className   = `report-stufe-option${stufe === current ? ' active' : ''}`;
+    opt.textContent = stufe;
+    opt.addEventListener('click', () => {
+      State.reportStufe = stufe;
+      renderReport();
+    });
+    wrap.appendChild(opt);
+  });
+
   container.appendChild(wrap);
 }
 

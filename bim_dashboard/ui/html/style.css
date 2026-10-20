@@ -1341,17 +1341,18 @@ body {
   color: var(--success);
 }
 
-/* --- Auswertung: Kostenstufen-Regler --- */
-.report-stufe-slider {
+/* --- Auswertung: Kostenstufen-Auswahl --- */
+.report-stufe-select {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-right: 8px;
+  gap: 10px;
+  margin-right: 12px;
   font-size: 11px;
 }
-.report-stufe-slider input[type=range] { width: 90px; accent-color: var(--accent); cursor: pointer; }
 .report-stufe-label { color: var(--text-dim); }
-.report-stufe-value { font-weight: 500; color: var(--text); white-space: nowrap; }
+.report-stufe-option { color: var(--text-dim); opacity: 0.5; cursor: pointer; white-space: nowrap; }
+.report-stufe-option:hover { opacity: 0.8; }
+.report-stufe-option.active { color: var(--accent); opacity: 1; font-weight: 600; cursor: default; }
 
 /* --- Gesamtkosten: Stufen-Select --- */
 .metric-label-row {
