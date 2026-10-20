@@ -6,8 +6,8 @@
 # Gruppen. Übergeordnete Gruppen der Selektion bleiben sichtbar, nur ihre
 # übrigen Unterelemente werden ausgeblendet.
 # Zwei Darstellungen (MODUS):
-#   :glas       – Rest bekommt vorübergehend ein Glas-Material (nur auf
-#                 Bauteil-Ebene; Flächenfarben im Inneren bleiben deckend)
+#   :glas       – Rest bekommt vorübergehend ein Glas-Material, auch auf
+#                 händisch eingefärbten Flächen im Inneren
 #   :ausblenden – Rest wird ausgeblendet und über die SketchUp-Ansicht
 #                 "Ausgeblendete Objekte" blass angezeigt
 # Speichert Originalzustand und stellt ihn vollständig wieder her.
@@ -21,6 +21,7 @@ module BimDashboard
 
     @saved_visibility = {}   # { entity => true/false }
     @saved_material   = {}   # { entity => Material/nil }
+    @saved_faces      = {}   # { face => [Material/nil, Rückseite/nil] }
     @saved_draw_hidden = nil # Ansichtsoption "Ausgeblendete Objekte" vorher
     @active           = false
 
@@ -35,8 +36,10 @@ module BimDashboard
       model = Sketchup.active_model
       @saved_visibility = {}
       @saved_material   = {}
+      @saved_faces      = {}
       @selected = selected_ids.to_a
       @contains = {}
+      @painted  = {}
 
       model.start_operation('BIM Isolate', true)
       hide_rest(model.entities)
@@ -58,6 +61,11 @@ module BimDashboard
       model.start_operation('BIM Isolate aufheben', true)
       @saved_visibility.each { |e, orig| e.visible = orig if e.valid? }
       @saved_material.each { |e, orig| e.material = orig if e.valid? }
+      @saved_faces.each do |f, (m, bm)|
+        next unless f.valid?
+        f.material = m
+        f.back_material = bm
+      end
       glas = model.materials[GLAS_NAME]
       model.materials.remove(glas) if glas
       model.rendering_options['DrawHiddenObjects'] = @saved_draw_hidden unless @saved_draw_hidden.nil?
@@ -66,6 +74,7 @@ module BimDashboard
 
       @saved_visibility = {}
       @saved_material   = {}
+      @saved_faces      = {}
       @active           = false
     end
 
@@ -86,11 +95,30 @@ module BimDashboard
         if contains_selected?(e.definition)
           hide_rest(e.definition.entities)
         elsif MODUS == :glas
-          @saved_material[e] = e.material unless @saved_material.key?(e)
-          e.material = glas_material
+          glas_entity(e)
         else
           @saved_visibility[e] = e.visible? unless @saved_visibility.key?(e)
           e.visible = false
+        end
+      end
+    end
+
+    # Bauteil und alle Flächen darin vorübergehend auf Glas setzen.
+    # Inhalte, die ein selektiertes Bauteil mitbenutzt (kopierte Komponenten),
+    # bleiben unverändert, sonst würde die Auswahl ebenfalls zu Glas.
+    def self.glas_entity(e)
+      @saved_material[e] = e.material unless @saved_material.key?(e)
+      e.material = glas_material
+      d = e.definition
+      return if @painted[d] || d.instances.any? { |i| @selected.include?(i.entityID) }
+      @painted[d] = true
+      d.entities.each do |c|
+        if c.is_a?(Sketchup::Face)
+          @saved_faces[c] = [c.material, c.back_material] unless @saved_faces.key?(c)
+          c.material = glas_material
+          c.back_material = glas_material
+        elsif c.is_a?(Sketchup::Group) || c.is_a?(Sketchup::ComponentInstance)
+          glas_entity(c)
         end
       end
     end
