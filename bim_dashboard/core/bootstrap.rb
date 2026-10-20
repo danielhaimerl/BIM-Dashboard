@@ -83,6 +83,7 @@ module BimDashboard
   load File.join(CORE_DIR, 'cost_manager.rb')
   load File.join(CORE_DIR, 'ai_agent.rb')
   load File.join(CORE_DIR, 'model_builder.rb')
+  load File.join(CORE_DIR, 'outliner.rb')
   load File.join(UI_DIR,   'dialog.rb')
   load File.join(PLUGIN_DIR, 'menu.rb')
 
