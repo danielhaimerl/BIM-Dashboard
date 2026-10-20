@@ -85,7 +85,7 @@ function renderCostReport(report) {
     : (v || '—');
 
   // --- Gesamt-Header ---
-  const bgf = parseFloat(document.getElementById('metaBGF')?.textContent) || 0;
+  const bgf = State.bgfTotal || 0;
   const hdr = document.createElement('div');
   hdr.className = 'cost-report-header';
   hdr.innerHTML = `

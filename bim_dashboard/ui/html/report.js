@@ -9,15 +9,36 @@
 // Fallback: für alte Daten die nur die Nummer haben, Bibliothek durchsuchen
 function resolveLabel(catKey, rawVal) {
   if (!rawVal || rawVal === '—') return rawVal;
-  if (catKey === 'din276') {
+  if (catKey.startsWith('din276')) {
     const lib = State.library || {};
     const kg = (lib.kostengruppen || []).find(k => k.kg === rawVal);
     if (kg) return kg.kg; // enthält bereits den vollen Text
     // Alte Daten: nur Nummer gespeichert → Präfix-Suche
     const byPrefix = (lib.kostengruppen || []).find(k => k.kg.startsWith(rawVal + ' ') || k.kg.startsWith(rawVal + '-'));
     if (byPrefix) return byPrefix.kg;
+    // Nicht in der Bibliothek → Bezeichnung aus einem Bauteil-Tag mit derselben Nummer
+    const tagged = (State.entities || []).map(e => e.tags && e.tags.din276).find(t => t && t.startsWith(rawVal + ' '));
+    if (tagged) return tagged;
   }
   return rawVal;
+}
+
+// Überspringt Unterebenen, die dieselbe KG-Nummer wie die Elterngruppe tragen
+// (z. B. Bauteil direkt mit "320 Gründung" getaggt → keine eigene 3. Ebene)
+function kgCode(label) {
+  const m = String(label).match(/^\s*(\d{3})/);
+  return m ? m[1] : null;
+}
+
+function skipSameKg(node, depth, parentLabel) {
+  const code = kgCode(parentLabel);
+  while (code && !node.__items__) {
+    const keys = Object.keys(node);
+    if (keys.length !== 1 || kgCode(keys[0]) !== code) break;
+    node = node[keys[0]];
+    depth++;
+  }
+  return { node, depth };
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +53,7 @@ function renderReport() {
   const activeGroups = State.groupBy.filter(Boolean);
 
   buildReportFilterSelects();
+  buildOutlineButtons(activeGroups.length);
 
   if (!activeGroups.length) {
     container.innerHTML = '<p class="placeholder">Gruppierung wählen um Auswertung zu starten.</p>';
@@ -54,7 +76,8 @@ function renderReport() {
   const totalCost = sumCosts(entities);
 
   container.appendChild(buildTotalHeader(totalCost, entities.length));
-  container.appendChild(buildSection(grouped, activeGroups, 0));
+  container.appendChild(buildSection(grouped, activeGroups, 0, totalCost));
+  applyOutlineLevel();
 
   const unclassified = entities.filter(e => !isClassified(e)).length;
   if (unclassified > 0) {
@@ -67,12 +90,49 @@ function renderReport() {
 }
 
 // ---------------------------------------------------------------------------
+// Ebenen-Buttons 1, 2, 3 … (wie Gliederung in Excel)
+// Stufe n zeigt die Gruppen bis Ebene n; die letzte Stufe zeigt auch die Bauteile.
+// ---------------------------------------------------------------------------
+function buildOutlineButtons(groupCount) {
+  const wrap = document.getElementById('outlineButtons');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!groupCount) return;
+  if (State.outlineLevel > groupCount + 1) State.outlineLevel = null;
+  for (let n = 1; n <= groupCount + 1; n++) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm outline-btn';
+    btn.textContent = n;
+    btn.title = n <= groupCount ? `Bis Ebene ${n} anzeigen` : 'Alles mit Bauteilen anzeigen';
+    if (n === (State.outlineLevel || groupCount + 1)) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      State.outlineLevel = n;
+      wrap.querySelectorAll('.outline-btn').forEach(b => b.classList.toggle('active', b === btn));
+      applyOutlineLevel();
+    });
+    wrap.appendChild(btn);
+  }
+}
+
+function applyOutlineLevel() {
+  const level = State.outlineLevel;
+  if (!level) return; // Standard: alles aufgeklappt
+  document.querySelectorAll('#reportContainer .report-section').forEach(sec => {
+    const open   = Number(sec.dataset.depth) < level - 1;
+    const body   = sec.querySelector(':scope > .report-section-body');
+    const toggle = sec.querySelector(':scope > .report-section-header .report-toggle');
+    if (body)   body.style.display = open ? '' : 'none';
+    if (toggle) toggle.textContent = open ? '▾' : '▸';
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Gesamt-Header
 // ---------------------------------------------------------------------------
 function buildTotalHeader(total, count) {
   const hdr = document.createElement('div');
   hdr.className = 'cost-report-header';
-  const bgf = parseFloat(document.getElementById('metaBGF')?.textContent) || 0;
+  const bgf = State.bgfTotal || 0;
   hdr.innerHTML = `
     <div class="cost-report-kpi">
       <span>Bauteile</span>
@@ -93,7 +153,7 @@ function buildTotalHeader(total, count) {
 // ---------------------------------------------------------------------------
 // Rekursiver Gruppenaufbau
 // ---------------------------------------------------------------------------
-function buildSection(node, groupKeys, depth) {
+function buildSection(node, groupKeys, depth, parentTotal) {
   const frag = document.createDocumentFragment();
 
   if (node.__items__) {
@@ -102,16 +162,18 @@ function buildSection(node, groupKeys, depth) {
   }
 
   const catKey   = groupKeys[depth];
-  const catLabel = State.categories[catKey] || catKey;
+  const catLabel = groupLabel(catKey);
 
   Object.entries(node).forEach(([label, children]) => {
     const items    = collectItems(children);
     const count    = items.length;
     const subtotal = sumCosts(items);
     const displayLabel = resolveLabel(catKey, label);
+    const anteil   = parentTotal > 0 ? Math.round(subtotal / parentTotal * 100) : 0;
 
     const section = document.createElement('div');
     section.className = `report-section depth-${depth}`;
+    section.dataset.depth = depth;
 
     const hdr = document.createElement('div');
     hdr.className = 'report-section-header';
@@ -121,8 +183,13 @@ function buildSection(node, groupKeys, depth) {
       <span class="report-group-label">${escHtml(displayLabel)}</span>
       <span class="badge">${count}</span>
       <span class="report-spacer"></span>
-      <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
-      <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
+      <span class="pct-bar-wrap header-pct"><span class="pct-bar" style="width:${anteil * 0.6}%"></span><span>${anteil} %</span></span>
+      <span class="hdr-cols">
+        <span class="cost-section-menge">${fmtGroupMenge(items)}</span>
+        <span class="cost-section-bgf">${fmtBgf(subtotal)}</span>
+        <span class="cost-section-total">${subtotal > 0 ? fmtEur(subtotal) : '<span class="dim">—</span>'}</span>
+        <span class="report-select-hint" title="In SketchUp selektieren">⌖</span>
+      </span>
     `;
 
     hdr.addEventListener('click', (e) => {
@@ -146,10 +213,8 @@ function buildSection(node, groupKeys, depth) {
       toggle.textContent = collapsed ? '▾' : '▸';
     });
 
-    if (!node[label].__items__ && groupKeys[depth + 1]) {
-      body.appendChild(buildSummaryTable(children, groupKeys[depth + 1], subtotal));
-    }
-    body.appendChild(buildSection(children, groupKeys, depth + 1));
+    const sub = skipSameKg(children, depth + 1, label);
+    body.appendChild(buildSection(sub.node, groupKeys, sub.depth, subtotal));
 
     section.appendChild(hdr);
     section.appendChild(body);
@@ -160,65 +225,6 @@ function buildSection(node, groupKeys, depth) {
 }
 
 // ---------------------------------------------------------------------------
-// Zusammenfassungstabelle
-// ---------------------------------------------------------------------------
-function buildSummaryTable(node, nextCatKey, parentTotal) {
-  if (node.__items__) return document.createDocumentFragment();
-  const catLabel = State.categories[nextCatKey] || nextCatKey;
-  const wrap = document.createElement('div');
-  wrap.className = 'report-summary';
-  const tbl = document.createElement('table');
-  tbl.className = 'report-summary-table';
-  tbl.innerHTML = `
-    <colgroup>
-      <col style="width:auto">
-      <col style="width:60px">
-      <col style="width:120px">
-      <col style="width:130px">
-    </colgroup>
-    <thead><tr>
-      <th>${escHtml(catLabel)}</th>
-      <th class="num">Anzahl</th>
-      <th class="num">Anteil</th>
-      <th class="num">Gesamtbetrag</th>
-    </tr></thead>`;
-  const tbody    = document.createElement('tbody');
-  const allItems    = collectItems(node);
-  const totalCosts  = sumCosts(allItems);
-  Object.entries(node).forEach(([subLabel, subChildren]) => {
-    const items  = collectItems(subChildren);
-    const n      = items.length;
-    const cost   = sumCosts(items);
-    const anteil = totalCosts > 0 ? Math.round(cost / totalCosts * 100) : 0;
-    const displaySub = resolveLabel(nextCatKey, subLabel);
-    const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
-    tr.innerHTML = `
-      <td>${escHtml(displaySub)}</td>
-      <td class="num">${n}</td>
-      <td class="num">
-        <div class="pct-bar-wrap">
-          <div class="pct-bar" style="width:${anteil}%"></div>
-          <span>${anteil} %</span>
-        </div>
-      </td>
-      <td class="num">${cost > 0 ? fmtEur(cost) : '<span class="dim">—</span>'}</td>
-    `;
-    tr.addEventListener('click', () => {
-      State.selectedIds = new Set(items.map(i => String(i.id)));
-      syncSelectionToSketchUp();
-      updateSelectionBar();
-      renderEntityList();
-      showToast(`${n} Bauteil${n !== 1 ? 'e' : ''} selektiert`);
-    });
-    tbody.appendChild(tr);
-  });
-  tbl.appendChild(tbody);
-  wrap.appendChild(tbl);
-  return wrap;
-}
-
-// ---------------------------------------------------------------------------
 // Detail-Tabelle (mit Namens-Gruppierung)
 // ---------------------------------------------------------------------------
 function buildDetailTable(items) {
@@ -226,13 +232,14 @@ function buildDetailTable(items) {
   wrap.className = 'report-agg-wrapper';
   const tbl = document.createElement('table');
   tbl.className = 'report-table';
+  // Die letzten Spalten haben feste Breiten, passend zu .hdr-cols in den Gruppen-Kopfzeilen
   tbl.innerHTML = `<colgroup>
-    <col style="width:30%">
-    <col style="width:16%">
-    <col style="width:14%">
-    <col style="width:13%">
-    <col style="width:12%">
-    <col style="width:13%">
+    <col style="width:35%">
+    <col>
+    <col>
+    <col style="width:120px">
+    <col style="width:120px">
+    <col style="width:130px">
     <col style="width:24px">
   </colgroup>`;
 
@@ -691,6 +698,27 @@ function getCostData(entity) {
   };
 }
 
+// Mengensumme einer Gruppe – nur wenn alle Bauteile eine Menge in derselben Einheit haben
+function fmtGroupMenge(items) {
+  let sum = 0, unit = null;
+  for (const e of items) {
+    const cost = getCostData(e);
+    let menge, einheit;
+    if (cost && cost.menge != null) {
+      menge = cost.menge; einheit = cost.einheit;
+    } else {
+      const autoStr = (e.menge_auto || '').trim();
+      menge   = parseMengeAuto(autoStr);
+      einheit = autoStr.replace(/^[\d.,\s]+/, '').trim();
+    }
+    if (!(menge > 0) || !einheit || einheit === '?') return '';
+    if (unit === null) unit = einheit;
+    if (einheit !== unit) return '';
+    sum += menge;
+  }
+  return unit ? `${fmtNum(sum)} ${escHtml(unit)}` : '';
+}
+
 function parseMengeAuto(str) {
   const m = String(str).match(/[\d.,]+/);
   return m ? parseFloat(m[0].replace(',', '.')) : null;
@@ -712,6 +740,13 @@ function fmtEur(v) {
   return parseFloat(v).toLocaleString('de-DE', {
     minimumFractionDigits: 2, maximumFractionDigits: 2
   }) + ' €';
+}
+
+// Benchmark: Kosten je m² BGF (leer, wenn keine BGF oder keine Kosten)
+function fmtBgf(cost) {
+  const bgf = State.bgfTotal || 0;
+  if (!(bgf > 0 && cost > 0)) return '';
+  return Math.round(cost / bgf).toLocaleString('de-DE') + ' €/m² BGF';
 }
 
 function fmtNum(v) {
@@ -829,14 +864,15 @@ function collectExportSections(node, groupKeys, depth, rows) {
     return;
   }
   const catKey   = groupKeys[depth];
-  const catLabel = (State.categories && State.categories[catKey]) || catKey;
+  const catLabel = groupLabel(catKey);
 
   Object.entries(node).forEach(([label, children]) => {
     const items        = collectItems(children);
     const cost         = sumCosts(items);
     const displayLabel = resolveLabel(catKey, label);
     rows.push({ type: 'section', depth, label: `${catLabel}: ${displayLabel}`, count: items.length, cost });
-    collectExportSections(children, groupKeys, depth + 1, rows);
+    const sub = skipSameKg(children, depth + 1, label);
+    collectExportSections(sub.node, groupKeys, sub.depth, rows);
   });
 }
 

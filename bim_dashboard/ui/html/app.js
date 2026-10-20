@@ -326,13 +326,37 @@ function renderEntityList() {
   container.appendChild(renderGroup(grouped, 0));
 }
 
+// DIN 276 Ebenen für die Gruppierung: 1. Ebene = 100er (300), 2. Ebene = 10er (330),
+// 3. Ebene = der gespeicherte Tag selbst (331)
+const DIN276_LEVELS = {
+  din276_1: 'DIN 276 – 1. Ebene',
+  din276_2: 'DIN 276 – 2. Ebene',
+};
+
+function groupLabel(key) {
+  if (key === 'din276') return 'DIN 276 – 3. Ebene';
+  return DIN276_LEVELS[key] || (State.categories || {})[key] || key;
+}
+
+function groupValue(e, key) {
+  if (key === 'din276' || DIN276_LEVELS[key]) {
+    const raw = (e.tags && e.tags.din276) || '';
+    const m = raw.match(/^\s*(\d{3})/);
+    // 3. Ebene: nur nach Nummer gruppieren ("331" und "331 Tragende …" = eine Gruppe)
+    if (key === 'din276') return m ? m[1] : (raw || '—');
+    if (!m) return '—';
+    return key === 'din276_1' ? m[1][0] + '00' : m[1].slice(0, 2) + '0';
+  }
+  return (e.tags && e.tags[key]) || '—';
+}
+
 function groupEntities(entities, keys) {
   if (!keys.length) return { __items__: entities };
   const key  = keys[0];
   const rest = keys.slice(1);
   const groups = {};
   entities.forEach(e => {
-    const val = (e.tags && e.tags[key]) || '—';
+    const val = groupValue(e, key);
     if (!groups[val]) groups[val] = [];
     groups[val].push(e);
   });
@@ -984,6 +1008,11 @@ function updateKostenkennzahlen(gesamtkosten) {
 function populateCategorySelects() {
   const options = '<option value="">— keine —</option>' +
     Object.entries(State.categories)
+      .flatMap(([v, l]) => v === 'din276'
+        ? [['din276_1', DIN276_LEVELS.din276_1 + ' (100er)'],
+           ['din276_2', DIN276_LEVELS.din276_2 + ' (10er)'],
+           ['din276',   'DIN 276 – 3. Ebene (1er)']]
+        : [[v, l]])
       .map(([v, l]) => `<option value="${escHtml(v)}">${escHtml(l)}</option>`)
       .join('');
   ['groupBy1', 'groupBy2', 'groupBy3'].forEach(id => {
