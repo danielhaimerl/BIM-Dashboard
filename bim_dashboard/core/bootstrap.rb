@@ -61,8 +61,8 @@ module BimDashboard
 
   ELEMENT_MAPPING_FIELDS = [
     { 'key' => 'wohnungen', 'label' => 'Wohnungen',
-      'unit' => 'WE',
-      'hint' => 'Filter: Elementname oder Pfad (z.B. "Wohnungseingangstür" oder "Stufe/BGF - Bruttogrundfläche")' },
+      'unit' => 'Stk',
+      'hint' => 'Bezeichnung frei wählbar (z.B. "Stellplätze"). Filter: Elementname oder Pfad (z.B. "Wohnungseingangstür")' },
     { 'key' => 'bgf', 'label' => 'BGF – Bruttogrundfläche',
       'unit' => 'm²',
       'hint' => 'Pfad-Filter möglich, z.B. "01 - Kostenschätzung/BGF - Bruttogrundfläche"' },

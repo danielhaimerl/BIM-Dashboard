@@ -919,6 +919,11 @@ function updateEntityCount() {
   document.getElementById('metaBauteile').textContent       = total;
   document.getElementById('metaWohnungen').textContent      = wohnungen || '—';
   document.getElementById('metaKlassifiziert').textContent  = classified === 0 ? '—' : `${classified} / ${total}`;
+
+  // Bezeichnung der Bezugsgröße (z.B. Wohnungen, Stellplätze) aus der Konfiguration
+  const bezug = (State.elementMapping && State.elementMapping.wohnungen) || {};
+  document.getElementById('labelWohnungen').textContent  = bezug.name || 'Wohnungen';
+  document.getElementById('labelEurWohnung').textContent = '€/' + (bezug.name || 'Wohnung');
 }
 
 function updateAutoMetrics() {

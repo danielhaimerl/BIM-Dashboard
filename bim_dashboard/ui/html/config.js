@@ -11,7 +11,7 @@ var CONFIG_AGGS = [
 ];
 
 var CONFIG_UNITS = {
-  wohnungen: 'WE',
+  wohnungen: 'Stk',
   bgf:       'm²',
   bri:       'm³',
 };
@@ -77,7 +77,15 @@ function renderConfig() {
     }
 
     html += '<tr class="config-tr" data-key="' + escHtml(f.key) + '">';
-    html +=   '<td class="config-td-label">' + escHtml(f.label) + '</td>';
+    if (f.key === 'wohnungen') {
+      // Bezugsgröße frei benennbar (z.B. Stellplätze)
+      html += '<td class="config-td-label">'
+            +   '<input type="text" class="config-input cfg-name"'
+            +   ' value="' + escHtml(cfg.name || 'Wohnungen') + '" placeholder="z.B. Stellplätze" />'
+            + '</td>';
+    } else {
+      html += '<td class="config-td-label">' + escHtml(f.label) + '</td>';
+    }
     html +=   '<td><input type="text" class="config-input cfg-filter"'
             +   ' value="' + escHtml(cfg.filter || '') + '"'
             +   ' placeholder="Elementname oder Pfad/Name" /></td>';
@@ -138,6 +146,8 @@ function bindConfig() {
         filter:      (row.querySelector('.cfg-filter')?.value || '').trim(),
         aggregation: active ? active.dataset.agg : 'count',
       };
+      const nameEl = row.querySelector('.cfg-name');
+      if (nameEl) mapping[key].name = nameEl.value.trim();
     });
     State.elementMapping = mapping;
     ruby('saveElementMapping', mapping);
