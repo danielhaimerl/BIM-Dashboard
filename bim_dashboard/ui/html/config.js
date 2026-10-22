@@ -78,12 +78,10 @@ function renderConfig() {
 
     html += '<tr class="config-tr" data-key="' + escHtml(f.key) + '">';
     if (f.key === 'wohnungen') {
-      // Bezugsgröße frei benennbar: Mehrzahl für Anzahl, Einzahl für €/…
+      // Bezugsgröße frei benennbar (z.B. Stellplätze)
       html += '<td class="config-td-label">'
-            +   '<input type="text" class="config-input cfg-name" title="Bezeichnung (Mehrzahl)" style="display:block;margin-bottom:4px"'
+            +   '<input type="text" class="config-input cfg-name"'
             +   ' value="' + escHtml(cfg.name || 'Wohnungen') + '" placeholder="z.B. Stellplätze" />'
-            +   '<input type="text" class="config-input cfg-name-einzahl" style="display:block" title="Bezeichnung (Einzahl) für €/…"'
-            +   ' value="' + escHtml(cfg.name_einzahl || 'Wohnung') + '" placeholder="z.B. Stellplatz" />'
             + '</td>';
     } else {
       html += '<td class="config-td-label">' + escHtml(f.label) + '</td>';
@@ -149,10 +147,7 @@ function bindConfig() {
         aggregation: active ? active.dataset.agg : 'count',
       };
       const nameEl = row.querySelector('.cfg-name');
-      if (nameEl) {
-        mapping[key].name         = nameEl.value.trim();
-        mapping[key].name_einzahl = (row.querySelector('.cfg-name-einzahl')?.value || '').trim();
-      }
+      if (nameEl) mapping[key].name = nameEl.value.trim();
     });
     State.elementMapping = mapping;
     ruby('saveElementMapping', mapping);

@@ -923,7 +923,7 @@ function updateEntityCount() {
   // Bezeichnung der Bezugsgröße (z.B. Wohnungen, Stellplätze) aus der Konfiguration
   const bezug = (State.elementMapping && State.elementMapping.wohnungen) || {};
   document.getElementById('labelWohnungen').textContent  = bezug.name || 'Wohnungen';
-  document.getElementById('labelEurWohnung').textContent = '€/' + (bezug.name_einzahl || 'Wohnung');
+  document.getElementById('labelEurWohnung').textContent = '€/' + (bezug.name || 'Wohnung');
 }
 
 function updateAutoMetrics() {

@@ -54,8 +54,7 @@ module BimDashboard
 
   # Standardzuordnungen: filter = Name oder Pfad-Segment, aggregation = count|menge_auto
   ELEMENT_MAPPING_DEFAULTS = {
-    'wohnungen' => { 'filter' => 'Wohnungseingangstür',    'aggregation' => 'count',
-                     'name' => 'Wohnungen', 'name_einzahl' => 'Wohnung' },
+    'wohnungen' => { 'filter' => 'Wohnungseingangstür',    'aggregation' => 'count'      },
     'bgf'       => { 'filter' => 'BGF - Bruttogrundfläche','aggregation' => 'menge_auto' },
     'bri'       => { 'filter' => 'BRI - Bruttorauminhalt', 'aggregation' => 'menge_auto' },
   }.freeze
@@ -63,7 +62,7 @@ module BimDashboard
   ELEMENT_MAPPING_FIELDS = [
     { 'key' => 'wohnungen', 'label' => 'Wohnungen',
       'unit' => 'Stk',
-      'hint' => 'Bezeichnung frei wählbar (Mehrzahl / Einzahl, z.B. "Stellplätze" / "Stellplatz"). Filter: Elementname oder Pfad (z.B. "Wohnungseingangstür")' },
+      'hint' => 'Bezeichnung frei wählbar (z.B. "Stellplätze"). Filter: Elementname oder Pfad (z.B. "Wohnungseingangstür")' },
     { 'key' => 'bgf', 'label' => 'BGF – Bruttogrundfläche',
       'unit' => 'm²',
       'hint' => 'Pfad-Filter möglich, z.B. "01 - Kostenschätzung/BGF - Bruttogrundfläche"' },
