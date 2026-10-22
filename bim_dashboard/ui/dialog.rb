@@ -10,7 +10,7 @@ module BimDashboard
 
     DIALOG_OPTS = {
       dialog_title:    'BIM Dashboard',
-      preferences_key: 'bim_dashboard_v80',
+      preferences_key: 'bim_dashboard_v81',
       resizable:       true,
       width:           1200,
       height:          750,
@@ -211,10 +211,7 @@ module BimDashboard
           id_set = ids.map(&:to_i).to_set
           all_tuples.select { |e, _p, _t| id_set.include?(e.entityID) }
         else
-          all_tuples.select do |e, _p, _t|
-            d = e.attribute_dictionary(DICT_NAME)
-            d && !d.to_h.empty?
-          end
+          quantity_tuples(all_tuples, model)
         end
 
         begin
@@ -781,13 +778,35 @@ module BimDashboard
     # Berechnet Mengen für alle klassifizierten Entities (lautlos im Hintergrund)
     def self.auto_calculate_quantities
       TagManager.make_copies_unique
-      tuples = TagManager.collect_all_entities.select do |e, _p, _t|
-        d = e.attribute_dictionary(DICT_NAME)
-        d && !d.to_h.empty?
-      end
+      tuples = quantity_tuples(TagManager.collect_all_entities, Sketchup.active_model)
       QuantityCalculator.calculate_and_store_batch(tuples) if tuples.any?
     rescue => e
       puts "[BIM] Auto-Mengenberechnung fehlgeschlagen: #{e.message}"
+    end
+
+    # Klassifizierte Entities plus Elemente aus der Konfiguration (BGF, BRI …).
+    # Letztere bekommen immer eine Menge, mit der Einheit aus der Konfiguration.
+    def self.quantity_tuples(all_tuples, model)
+      units = ELEMENT_MAPPING_FIELDS.map { |f| [f['key'], f['unit']] }.to_h
+      kennzahlen = read_element_mapping(model).select do |_k, c|
+        c['aggregation'] == 'menge_auto' && !c['filter'].to_s.empty?
+      end
+      all_tuples.select do |e, path, _t|
+        d = e.attribute_dictionary(DICT_NAME)
+        next true if d && !d.to_h.empty?
+        key, _c = kennzahlen.find { |_k, c| matches_filter?(e, path, c['filter']) }
+        next false unless key
+        e.set_attribute(DICT_NAME, 'einheit', units[key])
+        true
+      end
+    end
+
+    # Wie matchesFilter in app.js: Name exakt, oder Pfad mit "/"
+    def self.matches_filter?(entity, path, filter)
+      name = TagManager.entity_name(entity)
+      return name == filter unless filter.include?('/')
+      full = (path + [name]).join('/')
+      full == filter || full.end_with?('/' + filter)
     end
 
   end
