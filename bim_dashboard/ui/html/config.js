@@ -80,9 +80,9 @@ function renderConfig() {
     if (f.key === 'wohnungen') {
       // Bezugsgröße frei benennbar: Mehrzahl für Anzahl, Einzahl für €/…
       html += '<td class="config-td-label">'
-            +   '<input type="text" class="config-input cfg-name" title="Bezeichnung (Mehrzahl)" style="margin-bottom:4px"'
+            +   '<input type="text" class="config-input cfg-name" title="Bezeichnung (Mehrzahl)" style="display:block;margin-bottom:4px"'
             +   ' value="' + escHtml(cfg.name || 'Wohnungen') + '" placeholder="z.B. Stellplätze" />'
-            +   '<input type="text" class="config-input cfg-name-einzahl" title="Bezeichnung (Einzahl) für €/…"'
+            +   '<input type="text" class="config-input cfg-name-einzahl" style="display:block" title="Bezeichnung (Einzahl) für €/…"'
             +   ' value="' + escHtml(cfg.name_einzahl || 'Wohnung') + '" placeholder="z.B. Stellplatz" />'
             + '</td>';
     } else {
