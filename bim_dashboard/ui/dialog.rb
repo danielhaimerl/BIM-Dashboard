@@ -10,7 +10,7 @@ module BimDashboard
 
     DIALOG_OPTS = {
       dialog_title:    'BIM Dashboard',
-      preferences_key: 'bim_dashboard_v74',
+      preferences_key: 'bim_dashboard_v78',
       resizable:       true,
       width:           1200,
       height:          750,

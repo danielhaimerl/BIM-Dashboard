@@ -11,7 +11,7 @@ var CONFIG_AGGS = [
 ];
 
 var CONFIG_UNITS = {
-  wohnungen: 'WE',
+  wohnungen: 'Stk',
   bgf:       'm²',
   bri:       'm³',
 };
@@ -77,7 +77,17 @@ function renderConfig() {
     }
 
     html += '<tr class="config-tr" data-key="' + escHtml(f.key) + '">';
-    html +=   '<td class="config-td-label">' + escHtml(f.label) + '</td>';
+    if (f.key === 'wohnungen') {
+      // Bezugsgröße frei benennbar: Mehrzahl für Anzahl, Einzahl für €/…
+      html += '<td class="config-td-label">'
+            +   '<input type="text" class="config-input cfg-name" title="Bezeichnung (Mehrzahl)" style="margin-bottom:4px"'
+            +   ' value="' + escHtml(cfg.name || 'Wohnungen') + '" placeholder="z.B. Stellplätze" />'
+            +   '<input type="text" class="config-input cfg-name-einzahl" title="Bezeichnung (Einzahl) für €/…"'
+            +   ' value="' + escHtml(cfg.name_einzahl || 'Wohnung') + '" placeholder="z.B. Stellplatz" />'
+            + '</td>';
+    } else {
+      html += '<td class="config-td-label">' + escHtml(f.label) + '</td>';
+    }
     html +=   '<td><input type="text" class="config-input cfg-filter"'
             +   ' value="' + escHtml(cfg.filter || '') + '"'
             +   ' placeholder="Elementname oder Pfad/Name" /></td>';
@@ -138,6 +148,11 @@ function bindConfig() {
         filter:      (row.querySelector('.cfg-filter')?.value || '').trim(),
         aggregation: active ? active.dataset.agg : 'count',
       };
+      const nameEl = row.querySelector('.cfg-name');
+      if (nameEl) {
+        mapping[key].name         = nameEl.value.trim();
+        mapping[key].name_einzahl = (row.querySelector('.cfg-name-einzahl')?.value || '').trim();
+      }
     });
     State.elementMapping = mapping;
     ruby('saveElementMapping', mapping);
